@@ -1,0 +1,1285 @@
+import 'dart:io';
+
+import 'package:drift/drift.dart';
+import 'package:drift/native.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:sakuin/core/constants/default_categories.dart';
+import 'package:sakuin/core/utils/date_utils.dart';
+
+part 'app_database.g.dart';
+
+// ---------------------------------------------------------------------------
+// Tables
+// ---------------------------------------------------------------------------
+
+class Wallets extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get name => text()();
+  TextColumn get type => text()(); // cash | bank | ewallet | other
+  TextColumn get icon => text()();
+  IntColumn get color => integer()();
+  IntColumn get initialBalance => integer().withDefault(const Constant(0))();
+  BoolColumn get includeInTotal =>
+      boolean().withDefault(const Constant(true))();
+  BoolColumn get isArchived => boolean().withDefault(const Constant(false))();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+}
+
+class Categories extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get name => text()();
+  TextColumn get type => text()(); // income | expense
+  TextColumn get icon => text()();
+  IntColumn get color => integer()();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  BoolColumn get isArchived => boolean().withDefault(const Constant(false))();
+}
+
+@TableIndex(name: 'idx_tx_day_key', columns: {#dayKey})
+@TableIndex(name: 'idx_tx_wallet_id', columns: {#walletId})
+@TableIndex(name: 'idx_tx_to_wallet_id', columns: {#toWalletId})
+@TableIndex(name: 'idx_tx_category_id', columns: {#categoryId})
+@TableIndex(name: 'idx_tx_type_day_key', columns: {#type, #dayKey})
+@TableIndex(name: 'idx_tx_occurred_at', columns: {#occurredAt})
+class Transactions extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get type => text()(); // income | expense | transfer
+  IntColumn get amount => integer()();
+  IntColumn get categoryId =>
+      integer().nullable().references(Categories, #id)();
+  @ReferenceName('outgoingTransactions')
+  IntColumn get walletId => integer().references(Wallets, #id)();
+  @ReferenceName('incomingTransactions')
+  IntColumn get toWalletId => integer().nullable().references(Wallets, #id)();
+  IntColumn get fee => integer().withDefault(const Constant(0))();
+  TextColumn get note => text().withDefault(const Constant(''))();
+  TextColumn get itemName => text().nullable()();
+  IntColumn get occurredAt => integer()(); // UTC epoch millis
+  IntColumn get dayKey => integer()(); // Local yyyymmdd
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+}
+
+@TableIndex(
+  name: 'idx_item_memory_rank',
+  columns: {#isPinned, #useCount, #lastUsedAt},
+)
+class ItemMemory extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get nameNormalized => text().unique()();
+  TextColumn get displayName => text()();
+  TextColumn get type => text()(); // income | expense
+  IntColumn get lastAmount => integer()();
+  IntColumn get lastCategoryId =>
+      integer().nullable().references(Categories, #id)();
+  IntColumn get lastWalletId => integer().nullable().references(Wallets, #id)();
+  TextColumn get lastNote => text().withDefault(const Constant(''))();
+  IntColumn get useCount => integer().withDefault(const Constant(1))();
+  IntColumn get lastUsedAt => integer()();
+  BoolColumn get isPinned => boolean().withDefault(const Constant(false))();
+}
+
+class RecurringRules extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get title => text()();
+  TextColumn get type => text()(); // income | expense
+  IntColumn get amount => integer()();
+  IntColumn get categoryId =>
+      integer().nullable().references(Categories, #id)();
+  IntColumn get walletId => integer().references(Wallets, #id)();
+  TextColumn get note => text().withDefault(const Constant(''))();
+  TextColumn get frequency => text()(); // daily | weekly | monthly
+  IntColumn get dayOfWeek => integer().nullable()(); // 1 (Mon) .. 7 (Sun)
+  IntColumn get dayOfMonth => integer().nullable()(); // 1 .. 28
+  IntColumn get nextDue => integer()(); // yyyymmdd
+  BoolColumn get autoCreate => boolean().withDefault(const Constant(true))();
+  BoolColumn get isActive => boolean().withDefault(const Constant(true))();
+}
+
+@DataClassName('Person')
+class People extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get name => text()();
+  TextColumn get phone => text().nullable()();
+  TextColumn get note => text().withDefault(const Constant(''))();
+}
+
+@TableIndex(name: 'idx_debts_person_id', columns: {#personId})
+@TableIndex(name: 'idx_debts_status', columns: {#status})
+@TableIndex(name: 'idx_debts_wallet_id', columns: {#walletId})
+class Debts extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get personId => integer().references(People, #id)();
+  TextColumn get direction => text()(); // i_owe | they_owe
+  IntColumn get principal => integer()();
+  TextColumn get note => text().withDefault(const Constant(''))();
+  IntColumn get createdAt => integer()();
+  IntColumn get dueDate => integer().nullable()(); // UTC epoch millis
+  IntColumn get walletId => integer().nullable().references(Wallets, #id)();
+  TextColumn get status =>
+      text().withDefault(const Constant('open'))(); // open | settled
+}
+
+@TableIndex(name: 'idx_debt_payments_debt_id', columns: {#debtId})
+@TableIndex(name: 'idx_debt_payments_wallet_id', columns: {#walletId})
+class DebtPayments extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get debtId =>
+      integer().references(Debts, #id, onDelete: KeyAction.cascade)();
+  IntColumn get amount => integer()();
+  IntColumn get paidAt => integer()();
+  IntColumn get walletId => integer().nullable().references(Wallets, #id)();
+  TextColumn get note => text().withDefault(const Constant(''))();
+}
+
+class Budgets extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get categoryId =>
+      integer().nullable().references(Categories, #id)(); // null = total
+  IntColumn get amount => integer()();
+  TextColumn get periodType => text().withDefault(const Constant('monthly'))();
+}
+
+// ---------------------------------------------------------------------------
+// DTOs for SQL Aggregate Queries
+// ---------------------------------------------------------------------------
+
+class WalletWithBalance {
+  const WalletWithBalance({required this.wallet, required this.balance});
+
+  final Wallet wallet;
+  final int balance;
+}
+
+class TransactionDetail {
+  const TransactionDetail({
+    required this.transaction,
+    required this.wallet,
+    this.toWallet,
+    this.category,
+  });
+
+  final Transaction transaction;
+  final Wallet wallet;
+  final Wallet? toWallet;
+  final Category? category;
+}
+
+class PeriodSummary {
+  const PeriodSummary({required this.income, required this.expense});
+
+  final int income;
+  final int expense;
+
+  int get net => income - expense;
+}
+
+class CategoryAggregate {
+  const CategoryAggregate({
+    required this.categoryId,
+    required this.categoryName,
+    required this.icon,
+    required this.color,
+    required this.total,
+    required this.count,
+  });
+
+  final int? categoryId;
+  final String categoryName;
+  final String icon;
+  final int color;
+  final int total;
+  final int count;
+}
+
+class DailyTrendPoint {
+  const DailyTrendPoint({
+    required this.dayKey,
+    required this.income,
+    required this.expense,
+  });
+
+  final int dayKey;
+  final int income;
+  final int expense;
+}
+
+class DebtWithSummary {
+  const DebtWithSummary({
+    required this.debt,
+    required this.person,
+    required this.paidTotal,
+    this.walletName,
+  });
+
+  final Debt debt;
+  final Person person;
+  final int paidTotal;
+  final String? walletName;
+
+  int get remaining => (debt.principal - paidTotal).clamp(0, debt.principal);
+  double get progress =>
+      debt.principal <= 0 ? 1.0 : (paidTotal / debt.principal).clamp(0.0, 1.0);
+  bool get isOverdue =>
+      debt.status == 'open' &&
+      debt.dueDate != null &&
+      DateTime.fromMillisecondsSinceEpoch(debt.dueDate!)
+          .isBefore(DateTime.now());
+}
+
+class PersonDebtSummary {
+  const PersonDebtSummary({
+    required this.person,
+    required this.iOweRemaining,
+    required this.theyOweRemaining,
+    required this.openCount,
+  });
+
+  final Person person;
+  final int iOweRemaining;
+  final int theyOweRemaining;
+  final int openCount;
+
+  /// Positif = mereka berutang ke saya; Negatif = saya berutang ke mereka.
+  int get netTheyOwe => theyOweRemaining - iOweRemaining;
+}
+
+// ---------------------------------------------------------------------------
+// Database
+// ---------------------------------------------------------------------------
+
+@DriftDatabase(
+  tables: [
+    Wallets,
+    Categories,
+    Transactions,
+    ItemMemory,
+    RecurringRules,
+    People,
+    Debts,
+    DebtPayments,
+    Budgets,
+  ],
+)
+class AppDatabase extends _$AppDatabase {
+  AppDatabase([QueryExecutor? executor]) : super(executor ?? _openConnection());
+
+  /// Versi skema Drift. Naikkan angka ini saat menambah/mengubah tabel di masa depan
+  /// dan tambahkan langkah migrasi non-destruktif di [migration.onUpgrade]
+  /// agar update APK tanpa uninstall tetap mempertahankan seluruh data pengguna.
+  @override
+  int get schemaVersion => 1;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+    onCreate: (m) async {
+      await m.createAll();
+      await _seedDefaultCategories();
+    },
+    onUpgrade: (m, from, to) async {
+      // Migrasi bertahap non-destruktif untuk versi mendatang (contoh: if (from < 2) ...)
+      // Jangan pernah drop tabel pengguna saat upgrade.
+    },
+    beforeOpen: (details) async {
+      await customStatement('PRAGMA foreign_keys = ON');
+      await customStatement('PRAGMA journal_mode = WAL');
+      // Pastikan kategori default tersedia jika tabel kosong (mis. setelah restore parsial)
+      final catCount = await _countCategories();
+      if (catCount == 0) {
+        await _seedDefaultCategories();
+      }
+    },
+  );
+
+  Future<int> _countCategories() async {
+    final row = await customSelect('SELECT COUNT(*) AS c FROM categories')
+        .getSingle();
+    return row.read<int>('c');
+  }
+
+  Future<void> _seedDefaultCategories() async {
+    await batch((b) {
+      for (final seed in DefaultSeeds.categories) {
+        b.insert(
+          categories,
+          CategoriesCompanion.insert(
+            name: seed.name,
+            type: seed.type,
+            icon: seed.icon,
+            color: seed.color,
+            sortOrder: Value(seed.sortOrder),
+          ),
+        );
+      }
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Wallets (SQL-aggregated balances)
+  // -------------------------------------------------------------------------
+
+  static const String _walletBalanceSql = '''
+SELECT
+  w.id,
+  w.name,
+  w.type,
+  w.icon,
+  w.color,
+  w.initial_balance,
+  w.include_in_total,
+  w.is_archived,
+  w.sort_order,
+  w.initial_balance
+  + COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.wallet_id = w.id AND t.type = 'income'), 0)
+  - COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.wallet_id = w.id AND t.type = 'expense'), 0)
+  - COALESCE((SELECT SUM(t.amount + t.fee) FROM transactions t WHERE t.wallet_id = w.id AND t.type = 'transfer'), 0)
+  + COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.to_wallet_id = w.id AND t.type = 'transfer'), 0)
+  + COALESCE((SELECT SUM(CASE WHEN d.direction = 'i_owe' THEN d.principal ELSE -d.principal END) FROM debts d WHERE d.wallet_id = w.id), 0)
+  + COALESCE((SELECT SUM(CASE WHEN d.direction = 'they_owe' THEN dp.amount ELSE -dp.amount END) FROM debt_payments dp INNER JOIN debts d ON d.id = dp.debt_id WHERE dp.wallet_id = w.id), 0)
+  AS balance
+FROM wallets w
+''';
+
+  WalletWithBalance _mapWalletBalanceRow(QueryRow row) {
+    final wallet = Wallet(
+      id: row.read<int>('id'),
+      name: row.read<String>('name'),
+      type: row.read<String>('type'),
+      icon: row.read<String>('icon'),
+      color: row.read<int>('color'),
+      initialBalance: row.read<int>('initial_balance'),
+      includeInTotal: row.read<bool>('include_in_total'),
+      isArchived: row.read<bool>('is_archived'),
+      sortOrder: row.read<int>('sort_order'),
+    );
+    return WalletWithBalance(wallet: wallet, balance: row.read<int>('balance'));
+  }
+
+  Stream<List<WalletWithBalance>> watchWalletsWithBalances({
+    bool includeArchived = false,
+  }) {
+    final whereClause = includeArchived ? '' : 'WHERE w.is_archived = 0';
+    final sql =
+        '$_walletBalanceSql $whereClause ORDER BY w.sort_order ASC, w.id ASC';
+    return customSelect(
+      sql,
+      readsFrom: {wallets, transactions, debts, debtPayments},
+    ).watch().map((rows) => rows.map(_mapWalletBalanceRow).toList());
+  }
+
+  Future<List<WalletWithBalance>> getWalletsWithBalances({
+    bool includeArchived = false,
+  }) async {
+    final whereClause = includeArchived ? '' : 'WHERE w.is_archived = 0';
+    final sql =
+        '$_walletBalanceSql $whereClause ORDER BY w.sort_order ASC, w.id ASC';
+    final rows = await customSelect(sql).get();
+    return rows.map(_mapWalletBalanceRow).toList();
+  }
+
+  Future<WalletWithBalance?> getWalletWithBalance(int walletId) async {
+    final sql = '$_walletBalanceSql WHERE w.id = ?';
+    final rows = await customSelect(
+      sql,
+      variables: [Variable.withInt(walletId)],
+    ).get();
+    if (rows.isEmpty) return null;
+    return _mapWalletBalanceRow(rows.first);
+  }
+
+  Future<int> countWalletReferences(int walletId) async {
+    final row = await customSelect(
+      '''
+      SELECT
+        (SELECT COUNT(*) FROM transactions WHERE wallet_id = ? OR to_wallet_id = ?) +
+        (SELECT COUNT(*) FROM debts WHERE wallet_id = ?) +
+        (SELECT COUNT(*) FROM debt_payments WHERE wallet_id = ?) +
+        (SELECT COUNT(*) FROM recurring_rules WHERE wallet_id = ?) AS total
+      ''',
+      variables: [
+        Variable.withInt(walletId),
+        Variable.withInt(walletId),
+        Variable.withInt(walletId),
+        Variable.withInt(walletId),
+        Variable.withInt(walletId),
+      ],
+    ).getSingle();
+    return row.read<int>('total');
+  }
+
+  Future<void> reorderWallets(List<int> orderedIds) async {
+    await transaction(() async {
+      for (var i = 0; i < orderedIds.length; i++) {
+        await (update(wallets)..where((w) => w.id.equals(orderedIds[i]))).write(
+          WalletsCompanion(sortOrder: Value(i)),
+        );
+      }
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // Categories (ordered by recent usage or sort_order)
+  // -------------------------------------------------------------------------
+
+  Stream<List<Category>> watchCategories({
+    String? type,
+    bool includeArchived = false,
+  }) {
+    final q = select(categories);
+    if (type != null) {
+      q.where((c) => c.type.equals(type));
+    }
+    if (!includeArchived) {
+      q.where((c) => c.isArchived.equals(false));
+    }
+    q.orderBy([
+      (c) => OrderingTerm.asc(c.sortOrder),
+      (c) => OrderingTerm.asc(c.id),
+    ]);
+    return q.watch();
+  }
+
+  /// Mengurutkan kategori berdasarkan pemakaian terbaru lalu sort_order (smart defaults).
+  Future<List<Category>> getCategoriesByRecentUsage(String type) async {
+    final rows = await customSelect(
+      '''
+      SELECT c.*, COALESCE(MAX(t.occurred_at), 0) AS last_used
+      FROM categories c
+      LEFT JOIN transactions t ON t.category_id = c.id
+      WHERE c.type = ? AND c.is_archived = 0
+      GROUP BY c.id
+      ORDER BY last_used DESC, c.sort_order ASC, c.id ASC
+      ''',
+      variables: [Variable.withString(type)],
+    ).get();
+
+    return rows
+        .map(
+          (r) => Category(
+            id: r.read<int>('id'),
+            name: r.read<String>('name'),
+            type: r.read<String>('type'),
+            icon: r.read<String>('icon'),
+            color: r.read<int>('color'),
+            sortOrder: r.read<int>('sort_order'),
+            isArchived: r.read<bool>('is_archived'),
+          ),
+        )
+        .toList();
+  }
+
+  Future<int?> findCategoryIdByName(String name, String type) async {
+    final q = select(categories)
+      ..where((c) => c.name.equals(name) & c.type.equals(type))
+      ..limit(1);
+    final cat = await q.getSingleOrNull();
+    return cat?.id;
+  }
+
+  // -------------------------------------------------------------------------
+  // Transactions (Keyset Pagination + CRUD + Item Memory Upsert)
+  // -------------------------------------------------------------------------
+
+  static String normalizeItemName(String raw) =>
+      raw.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+  Future<int> saveTransactionWithMemory({
+    required String type,
+    required int amount,
+    required int walletId,
+    int? categoryId,
+    int? toWalletId,
+    int fee = 0,
+    String note = '',
+    String? itemName,
+    required DateTime occurredAt,
+    int? existingId,
+    bool updateItemMemory = true,
+  }) async {
+    final nowMillis = DateTime.now().toUtc().millisecondsSinceEpoch;
+    final occurredMillis = occurredAt.toUtc().millisecondsSinceEpoch;
+    final dayKey = AppDateUtils.toDayKey(occurredAt);
+    final trimmedItem = itemName?.trim();
+    final cleanItem = (trimmedItem == null || trimmedItem.isEmpty)
+        ? null
+        : trimmedItem;
+
+    return transaction(() async {
+      late int txId;
+      if (existingId != null) {
+        await (update(
+          transactions,
+        )..where((t) => t.id.equals(existingId))).write(
+          TransactionsCompanion(
+            type: Value(type),
+            amount: Value(amount),
+            categoryId: Value(categoryId),
+            walletId: Value(walletId),
+            toWalletId: Value(toWalletId),
+            fee: Value(fee),
+            note: Value(note.trim()),
+            itemName: Value(cleanItem),
+            occurredAt: Value(occurredMillis),
+            dayKey: Value(dayKey),
+            updatedAt: Value(nowMillis),
+          ),
+        );
+        txId = existingId;
+      } else {
+        txId = await into(transactions).insert(
+          TransactionsCompanion.insert(
+            type: type,
+            amount: amount,
+            categoryId: Value(categoryId),
+            walletId: walletId,
+            toWalletId: Value(toWalletId),
+            fee: Value(fee),
+            note: Value(note.trim()),
+            itemName: Value(cleanItem),
+            occurredAt: occurredMillis,
+            dayKey: dayKey,
+            createdAt: nowMillis,
+            updatedAt: nowMillis,
+          ),
+        );
+      }
+
+      if (updateItemMemory &&
+          cleanItem != null &&
+          (type == 'income' || type == 'expense')) {
+        await upsertItemMemory(
+          displayName: cleanItem,
+          type: type,
+          amount: amount,
+          categoryId: categoryId,
+          walletId: walletId,
+          note: note.trim(),
+        );
+      }
+
+      return txId;
+    });
+  }
+
+  /// Restore transaksi utuh setelah Undo delete.
+  Future<int> restoreDeletedTransaction(Transaction tx) {
+    return into(transactions).insert(
+      TransactionsCompanion(
+        id: Value(tx.id),
+        type: Value(tx.type),
+        amount: Value(tx.amount),
+        categoryId: Value(tx.categoryId),
+        walletId: Value(tx.walletId),
+        toWalletId: Value(tx.toWalletId),
+        fee: Value(tx.fee),
+        note: Value(tx.note),
+        itemName: Value(tx.itemName),
+        occurredAt: Value(tx.occurredAt),
+        dayKey: Value(tx.dayKey),
+        createdAt: Value(tx.createdAt),
+        updatedAt: Value(tx.updatedAt),
+      ),
+      mode: InsertMode.insertOrReplace,
+    );
+  }
+
+  Future<void> deleteTransactionsByIds(List<int> ids) async {
+    if (ids.isEmpty) return;
+    await (delete(transactions)..where((t) => t.id.isIn(ids))).go();
+  }
+
+  Future<TransactionDetail?> getLatestTransaction() async {
+    final list = await fetchTransactionsPage(limit: 1);
+    return list.isEmpty ? null : list.first;
+  }
+
+  /// Keyset pagination berbasis (occurredAt, id) menurun untuk scroll 120 Hz.
+  Future<List<TransactionDetail>> fetchTransactionsPage({
+    int limit = 40,
+    int? cursorOccurredAt,
+    int? cursorId,
+    int? startDayKey,
+    int? endDayKey,
+    String? type,
+    int? categoryId,
+    int? walletId,
+    String? searchQuery,
+  }) async {
+    final conditions = <String>[];
+    final vars = <Variable>[];
+
+    if (cursorOccurredAt != null && cursorId != null) {
+      conditions.add('(t.occurred_at < ? OR (t.occurred_at = ? AND t.id < ?))');
+      vars.add(Variable.withInt(cursorOccurredAt));
+      vars.add(Variable.withInt(cursorOccurredAt));
+      vars.add(Variable.withInt(cursorId));
+    }
+    if (startDayKey != null) {
+      conditions.add('t.day_key >= ?');
+      vars.add(Variable.withInt(startDayKey));
+    }
+    if (endDayKey != null) {
+      conditions.add('t.day_key <= ?');
+      vars.add(Variable.withInt(endDayKey));
+    }
+    if (type != null && type.isNotEmpty) {
+      conditions.add('t.type = ?');
+      vars.add(Variable.withString(type));
+    }
+    if (categoryId != null) {
+      conditions.add('t.category_id = ?');
+      vars.add(Variable.withInt(categoryId));
+    }
+    if (walletId != null) {
+      conditions.add('(t.wallet_id = ? OR t.to_wallet_id = ?)');
+      vars.add(Variable.withInt(walletId));
+      vars.add(Variable.withInt(walletId));
+    }
+    if (searchQuery != null && searchQuery.trim().isNotEmpty) {
+      final like = '%${searchQuery.trim().toLowerCase()}%';
+      conditions.add(
+        '(LOWER(COALESCE(t.item_name, \'\')) LIKE ? OR LOWER(t.note) LIKE ? OR LOWER(COALESCE(c.name, \'\')) LIKE ? OR LOWER(w.name) LIKE ?)',
+      );
+      vars.add(Variable.withString(like));
+      vars.add(Variable.withString(like));
+      vars.add(Variable.withString(like));
+      vars.add(Variable.withString(like));
+    }
+
+    final whereSql = conditions.isEmpty
+        ? ''
+        : 'WHERE ${conditions.join(' AND ')}';
+    vars.add(Variable.withInt(limit));
+
+    final rows = await customSelect('''
+      SELECT
+        t.id AS t_id, t.type AS t_type, t.amount AS t_amount, t.category_id AS t_category_id,
+        t.wallet_id AS t_wallet_id, t.to_wallet_id AS t_to_wallet_id, t.fee AS t_fee,
+        t.note AS t_note, t.item_name AS t_item_name, t.occurred_at AS t_occurred_at,
+        t.day_key AS t_day_key, t.created_at AS t_created_at, t.updated_at AS t_updated_at,
+        w.id AS w_id, w.name AS w_name, w.type AS w_type, w.icon AS w_icon,
+        w.color AS w_color, w.initial_balance AS w_initial_balance,
+        w.include_in_total AS w_include_in_total, w.is_archived AS w_is_archived,
+        w.sort_order AS w_sort_order,
+        tw.id AS tw_id, tw.name AS tw_name, tw.type AS tw_type, tw.icon AS tw_icon,
+        tw.color AS tw_color, tw.initial_balance AS tw_initial_balance,
+        tw.include_in_total AS tw_include_in_total, tw.is_archived AS tw_is_archived,
+        tw.sort_order AS tw_sort_order,
+        c.id AS c_id, c.name AS c_name, c.type AS c_type, c.icon AS c_icon,
+        c.color AS c_color, c.sort_order AS c_sort_order, c.is_archived AS c_is_archived
+      FROM transactions t
+      INNER JOIN wallets w ON w.id = t.wallet_id
+      LEFT JOIN wallets tw ON tw.id = t.to_wallet_id
+      LEFT JOIN categories c ON c.id = t.category_id
+      $whereSql
+      ORDER BY t.occurred_at DESC, t.id DESC
+      LIMIT ?
+      ''', variables: vars).get();
+
+    return rows.map(_mapTransactionDetailRow).toList();
+  }
+
+  Stream<List<TransactionDetail>> watchRecentTransactions({int limit = 10}) {
+    return customSelect(
+      '''
+      SELECT
+        t.id AS t_id, t.type AS t_type, t.amount AS t_amount, t.category_id AS t_category_id,
+        t.wallet_id AS t_wallet_id, t.to_wallet_id AS t_to_wallet_id, t.fee AS t_fee,
+        t.note AS t_note, t.item_name AS t_item_name, t.occurred_at AS t_occurred_at,
+        t.day_key AS t_day_key, t.created_at AS t_created_at, t.updated_at AS t_updated_at,
+        w.id AS w_id, w.name AS w_name, w.type AS w_type, w.icon AS w_icon,
+        w.color AS w_color, w.initial_balance AS w_initial_balance,
+        w.include_in_total AS w_include_in_total, w.is_archived AS w_is_archived,
+        w.sort_order AS w_sort_order,
+        tw.id AS tw_id, tw.name AS tw_name, tw.type AS tw_type, tw.icon AS tw_icon,
+        tw.color AS tw_color, tw.initial_balance AS tw_initial_balance,
+        tw.include_in_total AS tw_include_in_total, tw.is_archived AS tw_is_archived,
+        tw.sort_order AS tw_sort_order,
+        c.id AS c_id, c.name AS c_name, c.type AS c_type, c.icon AS c_icon,
+        c.color AS c_color, c.sort_order AS c_sort_order, c.is_archived AS c_is_archived
+      FROM transactions t
+      INNER JOIN wallets w ON w.id = t.wallet_id
+      LEFT JOIN wallets tw ON tw.id = t.to_wallet_id
+      LEFT JOIN categories c ON c.id = t.category_id
+      ORDER BY t.occurred_at DESC, t.id DESC
+      LIMIT ?
+      ''',
+      variables: [Variable.withInt(limit)],
+      readsFrom: {transactions, wallets, categories},
+    ).watch().map((rows) => rows.map(_mapTransactionDetailRow).toList());
+  }
+
+  TransactionDetail _mapTransactionDetailRow(QueryRow r) {
+    final tx = Transaction(
+      id: r.read<int>('t_id'),
+      type: r.read<String>('t_type'),
+      amount: r.read<int>('t_amount'),
+      categoryId: r.readNullable<int>('t_category_id'),
+      walletId: r.read<int>('t_wallet_id'),
+      toWalletId: r.readNullable<int>('t_to_wallet_id'),
+      fee: r.read<int>('t_fee'),
+      note: r.read<String>('t_note'),
+      itemName: r.readNullable<String>('t_item_name'),
+      occurredAt: r.read<int>('t_occurred_at'),
+      dayKey: r.read<int>('t_day_key'),
+      createdAt: r.read<int>('t_created_at'),
+      updatedAt: r.read<int>('t_updated_at'),
+    );
+    final wallet = Wallet(
+      id: r.read<int>('w_id'),
+      name: r.read<String>('w_name'),
+      type: r.read<String>('w_type'),
+      icon: r.read<String>('w_icon'),
+      color: r.read<int>('w_color'),
+      initialBalance: r.read<int>('w_initial_balance'),
+      includeInTotal: r.read<bool>('w_include_in_total'),
+      isArchived: r.read<bool>('w_is_archived'),
+      sortOrder: r.read<int>('w_sort_order'),
+    );
+    final twId = r.readNullable<int>('tw_id');
+    final toWallet = twId == null
+        ? null
+        : Wallet(
+            id: twId,
+            name: r.read<String>('tw_name'),
+            type: r.read<String>('tw_type'),
+            icon: r.read<String>('tw_icon'),
+            color: r.read<int>('tw_color'),
+            initialBalance: r.read<int>('tw_initial_balance'),
+            includeInTotal: r.read<bool>('tw_include_in_total'),
+            isArchived: r.read<bool>('tw_is_archived'),
+            sortOrder: r.read<int>('tw_sort_order'),
+          );
+    final cId = r.readNullable<int>('c_id');
+    final category = cId == null
+        ? null
+        : Category(
+            id: cId,
+            name: r.read<String>('c_name'),
+            type: r.read<String>('c_type'),
+            icon: r.read<String>('c_icon'),
+            color: r.read<int>('c_color'),
+            sortOrder: r.read<int>('c_sort_order'),
+            isArchived: r.read<bool>('c_is_archived'),
+          );
+    return TransactionDetail(
+      transaction: tx,
+      wallet: wallet,
+      toWallet: toWallet,
+      category: category,
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Item Memory (Auto-learn + Autocomplete + Quick Items)
+  // -------------------------------------------------------------------------
+
+  Future<void> upsertItemMemory({
+    required String displayName,
+    required String type,
+    required int amount,
+    int? categoryId,
+    int? walletId,
+    String note = '',
+    bool? isPinned,
+  }) async {
+    final normalized = normalizeItemName(displayName);
+    if (normalized.isEmpty) return;
+    final nowMillis = DateTime.now().toUtc().millisecondsSinceEpoch;
+
+    final existing = await (select(
+      itemMemory,
+    )..where((m) => m.nameNormalized.equals(normalized))).getSingleOrNull();
+
+    if (existing != null) {
+      await (update(itemMemory)..where((m) => m.id.equals(existing.id))).write(
+        ItemMemoryCompanion(
+          displayName: Value(displayName.trim()),
+          type: Value(type),
+          lastAmount: Value(amount),
+          lastCategoryId: Value(categoryId),
+          lastWalletId: Value(walletId),
+          lastNote: Value(note),
+          useCount: Value(existing.useCount + 1),
+          lastUsedAt: Value(nowMillis),
+          isPinned: isPinned != null ? Value(isPinned) : const Value.absent(),
+        ),
+      );
+    } else {
+      await into(itemMemory).insert(
+        ItemMemoryCompanion.insert(
+          nameNormalized: normalized,
+          displayName: displayName.trim(),
+          type: type,
+          lastAmount: amount,
+          lastCategoryId: Value(categoryId),
+          lastWalletId: Value(walletId),
+          lastNote: Value(note),
+          useCount: const Value(1),
+          lastUsedAt: nowMillis,
+          isPinned: Value(isPinned ?? false),
+        ),
+      );
+    }
+  }
+
+  Future<List<ItemMemoryData>> searchItemMemory(
+    String query, {
+    String? type,
+    int limit = 8,
+  }) async {
+    final normalized = normalizeItemName(query);
+    final q = select(itemMemory);
+    if (type != null && (type == 'income' || type == 'expense')) {
+      q.where((m) => m.type.equals(type));
+    }
+    if (normalized.isNotEmpty) {
+      q.where((m) => m.nameNormalized.like('%$normalized%'));
+    }
+    q.orderBy([
+      (m) => OrderingTerm.desc(m.isPinned),
+      (m) => OrderingTerm.desc(m.useCount),
+      (m) => OrderingTerm.desc(m.lastUsedAt),
+    ]);
+    q.limit(limit);
+    return q.get();
+  }
+
+  Stream<List<ItemMemoryData>> watchQuickItems({int limit = 12}) {
+    final q = select(itemMemory)
+      ..orderBy([
+        (m) => OrderingTerm.desc(m.isPinned),
+        (m) => OrderingTerm.desc(m.useCount),
+        (m) => OrderingTerm.desc(m.lastUsedAt),
+      ])
+      ..limit(limit);
+    return q.watch();
+  }
+
+  Future<void> togglePinItemMemory(int id, bool pinned) async {
+    await (update(itemMemory)..where((m) => m.id.equals(id))).write(
+      ItemMemoryCompanion(isPinned: Value(pinned)),
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Reports & Aggregates (100% SQL)
+  // -------------------------------------------------------------------------
+
+  Stream<PeriodSummary> watchPeriodSummary(int startDayKey, int endDayKey) {
+    return customSelect(
+      '''
+      SELECT
+        COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) AS income,
+        COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0)
+          + COALESCE(SUM(CASE WHEN type = 'transfer' AND fee > 0 THEN fee ELSE 0 END), 0) AS expense
+      FROM transactions
+      WHERE day_key >= ? AND day_key <= ?
+      ''',
+      variables: [Variable.withInt(startDayKey), Variable.withInt(endDayKey)],
+      readsFrom: {transactions},
+    ).watchSingle().map(
+      (r) => PeriodSummary(
+        income: r.read<int>('income'),
+        expense: r.read<int>('expense'),
+      ),
+    );
+  }
+
+  Future<PeriodSummary> getPeriodSummary(int startDayKey, int endDayKey) async {
+    final r = await customSelect(
+      '''
+      SELECT
+        COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) AS income,
+        COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0)
+          + COALESCE(SUM(CASE WHEN type = 'transfer' AND fee > 0 THEN fee ELSE 0 END), 0) AS expense
+      FROM transactions
+      WHERE day_key >= ? AND day_key <= ?
+      ''',
+      variables: [Variable.withInt(startDayKey), Variable.withInt(endDayKey)],
+    ).getSingle();
+    return PeriodSummary(
+      income: r.read<int>('income'),
+      expense: r.read<int>('expense'),
+    );
+  }
+
+  /// Breakdown per kategori (termasuk fee transfer dimasukkan ke kategori "Biaya Admin").
+  Future<List<CategoryAggregate>> getCategoryBreakdown({
+    required int startDayKey,
+    required int endDayKey,
+    required String type, // 'expense' | 'income'
+  }) async {
+    final rows = await customSelect(
+      '''
+      SELECT
+        c.id AS cat_id,
+        COALESCE(c.name, 'Tanpa Kategori') AS cat_name,
+        COALESCE(c.icon, 'other') AS cat_icon,
+        COALESCE(c.color, 4284771979) AS cat_color,
+        SUM(t.amount) AS total,
+        COUNT(*) AS cnt
+      FROM transactions t
+      LEFT JOIN categories c ON c.id = t.category_id
+      WHERE t.type = ? AND t.day_key >= ? AND t.day_key <= ?
+      GROUP BY c.id
+      ORDER BY total DESC
+      ''',
+      variables: [
+        Variable.withString(type),
+        Variable.withInt(startDayKey),
+        Variable.withInt(endDayKey),
+      ],
+    ).get();
+
+    final list = rows
+        .map(
+          (r) => CategoryAggregate(
+            categoryId: r.readNullable<int>('cat_id'),
+            categoryName: r.read<String>('cat_name'),
+            icon: r.read<String>('cat_icon'),
+            color: r.read<int>('cat_color'),
+            total: r.read<int>('total'),
+            count: r.read<int>('cnt'),
+          ),
+        )
+        .toList();
+
+    // Tambahkan biaya admin transfer ke kategori "Biaya Admin" pada laporan pengeluaran
+    if (type == 'expense') {
+      final feeRow = await customSelect(
+        '''
+        SELECT COALESCE(SUM(fee), 0) AS total_fee, COUNT(*) AS cnt
+        FROM transactions
+        WHERE type = 'transfer' AND fee > 0 AND day_key >= ? AND day_key <= ?
+        ''',
+        variables: [Variable.withInt(startDayKey), Variable.withInt(endDayKey)],
+      ).getSingle();
+      final totalFee = feeRow.read<int>('total_fee');
+      final feeCount = feeRow.read<int>('cnt');
+      if (totalFee > 0) {
+        final adminCat =
+            await (select(categories)
+                  ..where(
+                    (c) =>
+                        c.name.equals(DefaultSeeds.adminFeeCategoryName) &
+                        c.type.equals('expense'),
+                  )
+                  ..limit(1))
+                .getSingleOrNull();
+        final existingIdx = list.indexWhere(
+          (e) =>
+              (adminCat != null && e.categoryId == adminCat.id) ||
+              e.categoryName == DefaultSeeds.adminFeeCategoryName,
+        );
+        if (existingIdx >= 0) {
+          final prev = list[existingIdx];
+          list[existingIdx] = CategoryAggregate(
+            categoryId: prev.categoryId,
+            categoryName: prev.categoryName,
+            icon: prev.icon,
+            color: prev.color,
+            total: prev.total + totalFee,
+            count: prev.count + feeCount,
+          );
+        } else {
+          list.add(
+            CategoryAggregate(
+              categoryId: adminCat?.id,
+              categoryName: adminCat?.name ?? DefaultSeeds.adminFeeCategoryName,
+              icon: adminCat?.icon ?? 'admin_fee',
+              color: adminCat?.color ?? 0xFF475569,
+              total: totalFee,
+              count: feeCount,
+            ),
+          );
+        }
+        list.sort((a, b) => b.total.compareTo(a.total));
+      }
+    }
+
+    return list;
+  }
+
+  Future<List<DailyTrendPoint>> getDailyTrend({
+    required int startDayKey,
+    required int endDayKey,
+    int? walletId,
+  }) async {
+    final walletFilter = walletId == null
+        ? ''
+        : 'AND (wallet_id = ? OR to_wallet_id = ?)';
+    final vars = <Variable>[
+      Variable.withInt(startDayKey),
+      Variable.withInt(endDayKey),
+      if (walletId != null) Variable.withInt(walletId),
+      if (walletId != null) Variable.withInt(walletId),
+    ];
+
+    final rows = await customSelect('''
+      SELECT
+        day_key,
+        COALESCE(SUM(CASE WHEN type = 'income' THEN amount ELSE 0 END), 0) AS income,
+        COALESCE(SUM(CASE WHEN type = 'expense' THEN amount ELSE 0 END), 0)
+          + COALESCE(SUM(CASE WHEN type = 'transfer' AND fee > 0 THEN fee ELSE 0 END), 0) AS expense
+      FROM transactions
+      WHERE day_key >= ? AND day_key <= ? $walletFilter
+      GROUP BY day_key
+      ORDER BY day_key ASC
+      ''', variables: vars).get();
+
+    return rows
+        .map(
+          (r) => DailyTrendPoint(
+            dayKey: r.read<int>('day_key'),
+            income: r.read<int>('income'),
+            expense: r.read<int>('expense'),
+          ),
+        )
+        .toList();
+  }
+
+  Future<int> getCategorySpentInPeriod({
+    required int? categoryId,
+    required int startDayKey,
+    required int endDayKey,
+  }) async {
+    if (categoryId == null) {
+      final summary = await getPeriodSummary(startDayKey, endDayKey);
+      return summary.expense;
+    }
+    final row = await customSelect(
+      '''
+      SELECT COALESCE(SUM(amount), 0) AS total
+      FROM transactions
+      WHERE type = 'expense' AND category_id = ? AND day_key >= ? AND day_key <= ?
+      ''',
+      variables: [
+        Variable.withInt(categoryId),
+        Variable.withInt(startDayKey),
+        Variable.withInt(endDayKey),
+      ],
+    ).getSingle();
+    var total = row.read<int>('total');
+
+    // Jika kategori adalah Biaya Admin, tambahkan transfer fee
+    final adminCatId = await findCategoryIdByName(
+      DefaultSeeds.adminFeeCategoryName,
+      'expense',
+    );
+    if (adminCatId != null && adminCatId == categoryId) {
+      final feeRow = await customSelect(
+        '''
+        SELECT COALESCE(SUM(fee), 0) AS total_fee
+        FROM transactions
+        WHERE type = 'transfer' AND fee > 0 AND day_key >= ? AND day_key <= ?
+        ''',
+        variables: [Variable.withInt(startDayKey), Variable.withInt(endDayKey)],
+      ).getSingle();
+      total += feeRow.read<int>('total_fee');
+    }
+
+    return total;
+  }
+
+  // -------------------------------------------------------------------------
+  // Debts & People (SQL aggregates)
+  // -------------------------------------------------------------------------
+
+  Stream<List<DebtWithSummary>> watchDebtsWithSummary({
+    String? direction,
+    String? status,
+    int? personId,
+  }) {
+    final conditions = <String>[];
+    final vars = <Variable>[];
+    if (direction != null) {
+      conditions.add('d.direction = ?');
+      vars.add(Variable.withString(direction));
+    }
+    if (status != null) {
+      conditions.add('d.status = ?');
+      vars.add(Variable.withString(status));
+    }
+    if (personId != null) {
+      conditions.add('d.person_id = ?');
+      vars.add(Variable.withInt(personId));
+    }
+    final whereSql = conditions.isEmpty
+        ? ''
+        : 'WHERE ${conditions.join(' AND ')}';
+
+    return customSelect(
+      '''
+      SELECT
+        d.id AS d_id, d.person_id AS d_person_id, d.direction AS d_direction,
+        d.principal AS d_principal, d.note AS d_note, d.created_at AS d_created_at,
+        d.due_date AS d_due_date, d.wallet_id AS d_wallet_id, d.status AS d_status,
+        p.id AS p_id, p.name AS p_name, p.phone AS p_phone, p.note AS p_note,
+        w.name AS w_name,
+        COALESCE((SELECT SUM(dp.amount) FROM debt_payments dp WHERE dp.debt_id = d.id), 0) AS paid_total
+      FROM debts d
+      INNER JOIN people p ON p.id = d.person_id
+      LEFT JOIN wallets w ON w.id = d.wallet_id
+      $whereSql
+      ORDER BY
+        CASE WHEN d.status = 'open' THEN 0 ELSE 1 END ASC,
+        COALESCE(d.due_date, 9223372036854775807) ASC,
+        d.created_at DESC
+      ''',
+      variables: vars,
+      readsFrom: {debts, debtPayments, people, wallets},
+    ).watch().map(
+      (rows) => rows
+          .map(
+            (r) => DebtWithSummary(
+              debt: Debt(
+                id: r.read<int>('d_id'),
+                personId: r.read<int>('d_person_id'),
+                direction: r.read<String>('d_direction'),
+                principal: r.read<int>('d_principal'),
+                note: r.read<String>('d_note'),
+                createdAt: r.read<int>('d_created_at'),
+                dueDate: r.readNullable<int>('d_due_date'),
+                walletId: r.readNullable<int>('d_wallet_id'),
+                status: r.read<String>('d_status'),
+              ),
+              person: Person(
+                id: r.read<int>('p_id'),
+                name: r.read<String>('p_name'),
+                phone: r.readNullable<String>('p_phone'),
+                note: r.read<String>('p_note'),
+              ),
+              paidTotal: r.read<int>('paid_total'),
+              walletName: r.readNullable<String>('w_name'),
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  Stream<List<PersonDebtSummary>> watchPersonDebtSummaries() {
+    return customSelect(
+      '''
+      SELECT
+        p.id AS p_id, p.name AS p_name, p.phone AS p_phone, p.note AS p_note,
+        COALESCE(SUM(CASE
+          WHEN d.direction = 'i_owe' AND d.status = 'open'
+          THEN MAX(0, d.principal - COALESCE((SELECT SUM(dp.amount) FROM debt_payments dp WHERE dp.debt_id = d.id), 0))
+          ELSE 0
+        END), 0) AS i_owe_rem,
+        COALESCE(SUM(CASE
+          WHEN d.direction = 'they_owe' AND d.status = 'open'
+          THEN MAX(0, d.principal - COALESCE((SELECT SUM(dp.amount) FROM debt_payments dp WHERE dp.debt_id = d.id), 0))
+          ELSE 0
+        END), 0) AS they_owe_rem,
+        COALESCE(SUM(CASE WHEN d.status = 'open' THEN 1 ELSE 0 END), 0) AS open_cnt
+      FROM people p
+      LEFT JOIN debts d ON d.person_id = p.id
+      GROUP BY p.id
+      ORDER BY open_cnt DESC, p.name ASC
+      ''',
+      readsFrom: {people, debts, debtPayments},
+    ).watch().map(
+      (rows) => rows
+          .map(
+            (r) => PersonDebtSummary(
+              person: Person(
+                id: r.read<int>('p_id'),
+                name: r.read<String>('p_name'),
+                phone: r.readNullable<String>('p_phone'),
+                note: r.read<String>('p_note'),
+              ),
+              iOweRemaining: r.read<int>('i_owe_rem'),
+              theyOweRemaining: r.read<int>('they_owe_rem'),
+              openCount: r.read<int>('open_cnt'),
+            ),
+          )
+          .toList(),
+    );
+  }
+
+  /// Tambah pembayaran cicilan hutang & otomatis ubah status ke 'settled' jika lunas.
+  Future<int> addDebtPayment({
+    required int debtId,
+    required int amount,
+    required DateTime paidAt,
+    int? walletId,
+    String note = '',
+  }) async {
+    return transaction(() async {
+      final paymentId = await into(debtPayments).insert(
+        DebtPaymentsCompanion.insert(
+          debtId: debtId,
+          amount: amount,
+          paidAt: paidAt.toUtc().millisecondsSinceEpoch,
+          walletId: Value(walletId),
+          note: Value(note.trim()),
+        ),
+      );
+      await _recalculateDebtStatus(debtId);
+      return paymentId;
+    });
+  }
+
+  Future<void> deleteDebtPayment(int paymentId, int debtId) async {
+    await transaction(() async {
+      await (delete(debtPayments)..where((dp) => dp.id.equals(paymentId))).go();
+      await _recalculateDebtStatus(debtId);
+    });
+  }
+
+  Future<void> _recalculateDebtStatus(int debtId) async {
+    final debt = await (select(
+      debts,
+    )..where((d) => d.id.equals(debtId))).getSingleOrNull();
+    if (debt == null) return;
+    final paidRow = await customSelect(
+      'SELECT COALESCE(SUM(amount), 0) AS paid FROM debt_payments WHERE debt_id = ?',
+      variables: [Variable.withInt(debtId)],
+    ).getSingle();
+    final paid = paidRow.read<int>('paid');
+    final newStatus = paid >= debt.principal ? 'settled' : 'open';
+    if (newStatus != debt.status) {
+      await (update(debts)..where((d) => d.id.equals(debtId))).write(
+        DebtsCompanion(status: Value(newStatus)),
+      );
+    }
+  }
+
+  Future<Person> findOrCreatePerson(String name, {String? phone}) async {
+    final trimmed = name.trim();
+    final existing = await customSelect(
+      'SELECT * FROM people WHERE LOWER(name) = LOWER(?) LIMIT 1',
+      variables: [Variable.withString(trimmed)],
+    ).getSingleOrNull();
+    if (existing != null) {
+      return Person(
+        id: existing.read<int>('id'),
+        name: existing.read<String>('name'),
+        phone: existing.readNullable<String>('phone'),
+        note: existing.read<String>('note'),
+      );
+    }
+    final id = await into(people).insert(
+      PeopleCompanion.insert(
+        name: trimmed,
+        phone: Value(phone?.trim().isEmpty ?? true ? null : phone!.trim()),
+      ),
+    );
+    return Person(
+      id: id,
+      name: trimmed,
+      phone: phone?.trim().isEmpty ?? true ? null : phone!.trim(),
+      note: '',
+    );
+  }
+}
+
+LazyDatabase _openConnection() {
+  return LazyDatabase(() async {
+    final dir = await getApplicationDocumentsDirectory();
+    final file = File('${dir.path}/sakuin.db');
+    return NativeDatabase.createInBackground(file);
+  });
+}

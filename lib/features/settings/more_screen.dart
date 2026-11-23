@@ -1,0 +1,103 @@
+import 'package:flutter/material.dart';
+import 'package:sakuin/features/budget/budget_screen.dart';
+import 'package:sakuin/features/category/category_list_screen.dart';
+import 'package:sakuin/features/debt/debt_list_screen.dart';
+import 'package:sakuin/features/recurring/recurring_screen.dart';
+import 'package:sakuin/features/settings/backup_screen.dart';
+import 'package:sakuin/features/settings/settings_screen.dart';
+import 'package:sakuin/features/wallet/wallet_list_screen.dart';
+
+class MoreScreen extends StatelessWidget {
+  const MoreScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    void push(Widget screen) {
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Lainnya')),
+      body: ListView(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+        children: [
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.account_balance_wallet_outlined),
+                  title: const Text('Saku & Dompet'),
+                  subtitle: const Text(
+                    'Kelola dompet, transfer, koreksi saldo',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => push(const WalletListScreen()),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.handshake_outlined),
+                  title: const Text('Hutang & Piutang'),
+                  subtitle: const Text(
+                    'Catatan hutang teman, cicilan, penagihan',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => push(const DebtListScreen()),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.category_outlined),
+                  title: const Text('Kategori'),
+                  subtitle: const Text('Ubah atau tambah kategori kustom'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => push(const CategoryListScreen()),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.pie_chart_outline_rounded),
+                  title: const Text('Anggaran'),
+                  subtitle: const Text('Batas belanja bulanan & peringatan'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => push(const BudgetScreen()),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.event_repeat_rounded),
+                  title: const Text('Transaksi Berulang'),
+                  subtitle: const Text('Gaji, langganan, cicilan otomatis'),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => push(const RecurringScreen()),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Card(
+            child: Column(
+              children: [
+                ListTile(
+                  leading: const Icon(Icons.backup_outlined),
+                  title: const Text('Backup & Restore'),
+                  subtitle: const Text(
+                    'Simpan ke Google Drive / pulihkan data',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => push(const BackupScreen()),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.settings_outlined),
+                  title: const Text('Pengaturan'),
+                  subtitle: const Text(
+                    'Tanggal periode, tema, PIN & biometrik, pengingat',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => push(const SettingsScreen()),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
