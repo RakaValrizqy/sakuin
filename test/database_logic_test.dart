@@ -5,6 +5,8 @@ import 'package:sakuin/core/constants/default_categories.dart';
 import 'package:sakuin/core/db/app_database.dart';
 import 'package:sakuin/core/services/backup_service.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
+import 'package:sakuin/features/report/export_service.dart';
+import 'package:sakuin/features/report/report_providers.dart';
 
 void main() {
   late AppDatabase db;
@@ -288,5 +290,44 @@ void main() {
         expect(wallets.first.balance, 185000);
       },
     );
+  });
+
+  group('Ekspor Laporan CSV & PDF', () {
+    test('menghasilkan CSV dan PDF valid tanpa error', () async {
+      final cashId = await createWallet('Tunai', 200000);
+      final foodCatId = await db.findCategoryIdByName(
+        'Makanan & Minuman',
+        'expense',
+      );
+      final date = DateTime(2026, 11, 23, 12, 30);
+      await db.saveTransactionWithMemory(
+        type: 'expense',
+        amount: 25000,
+        walletId: cashId,
+        categoryId: foodCatId,
+        itemName: 'Nasi Goreng',
+        occurredAt: date,
+      );
+
+      final period = AppDateUtils.periodForDate(date, 1);
+      final exporter = ReportExportService(db);
+
+      final csv = await exporter.buildCsv(period);
+      expect(csv, contains('Nasi Goreng'));
+      expect(csv, contains('25000'));
+
+      final pdfBytes = await exporter.buildPdfBytes(
+        ReportData(
+          period: period,
+          previousPeriod: AppDateUtils.previousPeriod(period, 1),
+          summary: const PeriodSummary(income: 0, expense: 25000),
+          previousSummary: const PeriodSummary(income: 0, expense: 0),
+          categories: const [],
+          trend: const [],
+        ),
+      );
+      expect(pdfBytes.length, greaterThan(100));
+      expect(String.fromCharCodes(pdfBytes.take(5)), '%PDF-');
+    });
   });
 }

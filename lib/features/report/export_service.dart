@@ -80,6 +80,23 @@ class ReportExportService {
   }
 
   Future<void> exportPdfAndShare(ReportData data) async {
+    final bytes = await buildPdfBytes(data);
+    final dir = await getTemporaryDirectory();
+    final filename =
+        'sakuin_laporan_${data.period.startDayKey}_${data.period.endDayKey}.pdf';
+    final file = File('${dir.path}/$filename');
+    await file.writeAsBytes(bytes);
+
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile(file.path, mimeType: 'application/pdf')],
+        subject: 'Laporan PDF Sakuin (${data.period.label})',
+        text: 'Laporan keuangan Sakuin periode ${data.period.label}.',
+      ),
+    );
+  }
+
+  Future<List<int>> buildPdfBytes(ReportData data) async {
     final txs = await _db.fetchTransactionsPage(
       limit: 500,
       startDayKey: data.period.startDayKey,
@@ -233,20 +250,7 @@ class ReportExportService {
       ),
     );
 
-    final bytes = await doc.save();
-    final dir = await getTemporaryDirectory();
-    final filename =
-        'sakuin_laporan_${data.period.startDayKey}_${data.period.endDayKey}.pdf';
-    final file = File('${dir.path}/$filename');
-    await file.writeAsBytes(bytes);
-
-    await SharePlus.instance.share(
-      ShareParams(
-        files: [XFile(file.path, mimeType: 'application/pdf')],
-        subject: 'Laporan PDF Sakuin (${data.period.label})',
-        text: 'Laporan keuangan Sakuin periode ${data.period.label}.',
-      ),
-    );
+    return doc.save();
   }
 
   pw.Widget _pdfStat(String label, String value, PdfColor color) {
