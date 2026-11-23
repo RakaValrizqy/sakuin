@@ -10,6 +10,10 @@
 include: package:flutter_lints/flutter.yaml
 
 analyzer:
+  errors:
+    # Flutter 3.48+ menandai package:flutter/material.dart deprecated selama transisi ke material_ui.
+    # Abaikan info deprecation agar kompatibel lintas versi Flutter stable tanpa menambah dependensi baru.
+    deprecated_member_use: ignore
   exclude:
     - build/**
     - android/**
