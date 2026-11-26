@@ -60,6 +60,9 @@ class TransactionTile extends StatelessWidget {
     if (isTransfer && tx.fee > 0) {
       subtitleParts.add('Admin ${CurrencyFormatter.format(tx.fee)}');
     }
+    if (tx.splitGroupId != null) {
+      subtitleParts.add('Pecahan');
+    }
     if (tx.note.isNotEmpty) {
       subtitleParts.add(tx.note);
     }

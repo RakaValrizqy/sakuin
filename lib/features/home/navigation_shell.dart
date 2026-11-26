@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sakuin/core/services/notification_service.dart';
+import 'package:sakuin/core/services/qris_sync_service.dart';
 import 'package:sakuin/core/services/security_service.dart';
 import 'package:sakuin/core/services/settings_service.dart';
 import 'package:sakuin/core/services/update_service.dart';
@@ -45,6 +46,14 @@ class _NavigationShellState extends ConsumerState<NavigationShell> {
 
     final updater = ref.read(updateServiceProvider);
     await updater.cleanupOldApks();
+
+    // Sinkronisasi email QRIS otomatis di latar belakang (jika Gmail sudah dihubungkan)
+    final qrisSvc = ref.read(qrisSyncServiceProvider);
+    final qrisCfg = await qrisSvc.loadConfig();
+    if (qrisCfg.isConfigured && qrisCfg.autoSyncOnOpen) {
+      // Tidak memblokir UI; hasil otomatis muncul di banner Beranda.
+      qrisSvc.syncNow();
+    }
 
     if (settings.autoCheckUpdate) {
       final result = await updater.checkForUpdate();

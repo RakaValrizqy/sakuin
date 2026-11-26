@@ -36,7 +36,7 @@ class BackupPreview {
 class BackupService {
   BackupService(this._db);
 
-  static const int currentBackupVersion = 2;
+  static const int currentBackupVersion = 3;
   final AppDatabase _db;
 
   Future<String> buildJsonBackup() async {
@@ -416,6 +416,8 @@ class BackupService {
                   fee: Value(t.fee),
                   note: Value(t.note),
                   itemName: Value(t.itemName),
+                  splitGroupId: Value(t.splitGroupId),
+                  externalRef: Value(t.externalRef),
                   occurredAt: t.occurredAt,
                   dayKey: t.dayKey,
                   createdAt: t.createdAt,

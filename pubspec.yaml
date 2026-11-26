@@ -2,7 +2,7 @@ name: sakuin
 description: "Aplikasi pencatat keuangan offline-first yang cepat dan ringan."
 publish_to: 'none'
 
-version: 1.1.0+2
+version: 1.2.0+3
 
 environment:
   sdk: ^3.13.1

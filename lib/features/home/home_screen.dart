@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sakuin/core/constants/app_colors.dart';
 import 'package:sakuin/core/db/app_database.dart';
 import 'package:sakuin/core/db/db_provider.dart';
+import 'package:sakuin/core/services/qris_sync_service.dart';
 import 'package:sakuin/core/services/settings_service.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
@@ -10,6 +11,7 @@ import 'package:sakuin/core/utils/haptics.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/features/debt/debt_list_screen.dart';
 import 'package:sakuin/features/debt/debt_providers.dart';
+import 'package:sakuin/features/qris/qris_inbox_screen.dart';
 import 'package:sakuin/features/recurring/recurring_service.dart';
 import 'package:sakuin/features/transaction/transaction_form_sheet.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
@@ -96,6 +98,8 @@ class HomeScreen extends ConsumerWidget {
         ref.watch(recentTransactionsProvider).valueOrNull ?? const [];
     final debtTotals = ref.watch(debtTotalsProvider);
     final pendingRecurring = ref.watch(pendingRecurringRulesProvider);
+    final pendingQris =
+        ref.watch(pendingQrisDraftsProvider).valueOrNull ?? const [];
 
     final hideBalances = ref.watch(
       settingsProvider.select((s) => s.hideBalances),
@@ -149,6 +153,29 @@ class HomeScreen extends ConsumerWidget {
             periodLabel: period.label,
           ),
           const SizedBox(height: 14),
+
+          // 1b. Antrean Email QRIS dari Gmail Menunggu Review
+          if (pendingQris.isNotEmpty) ...[
+            Card(
+              color: cs.primaryContainer.withValues(alpha: 0.45),
+              child: ListTile(
+                leading: Icon(Icons.qr_code_2_rounded, color: cs.primary),
+                title: Text(
+                  '${pendingQris.length} transaksi QRIS menunggu review',
+                  style: tt.titleSmall,
+                ),
+                subtitle: Text(
+                  'Ketuk untuk konfirmasi cepat atau pecah jadi beberapa item',
+                  style: tt.bodySmall,
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const QrisInboxScreen()),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
 
           // 2. Pengingat Transaksi Berulang Menunggu Konfirmasi
           if (pendingRecurring.isNotEmpty) ...[

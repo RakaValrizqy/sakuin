@@ -233,6 +233,43 @@ class TransactionActions {
     return id;
   }
 
+  Future<String> saveSplitTransactions({
+    required String type,
+    required int walletId,
+    required DateTime occurredAt,
+    required List<SplitComponentInput> components,
+    int? replaceSingleTransactionId,
+    String? existingSplitGroupId,
+    String? externalRef,
+  }) async {
+    final groupId = await _db.saveSplitTransactions(
+      type: type,
+      walletId: walletId,
+      occurredAt: occurredAt,
+      components: components,
+      replaceSingleTransactionId: replaceSingleTransactionId,
+      existingSplitGroupId: existingSplitGroupId,
+      externalRef: externalRef,
+    );
+    await _ref.read(settingsProvider.notifier).setLastWalletId(walletId);
+    _bumpRevision();
+
+    if (type == 'expense') {
+      final uniqueCats = components
+          .map((c) => c.categoryId)
+          .whereType<int>()
+          .toSet();
+      if (uniqueCats.isEmpty) {
+        await _checkBudgetThresholds(null);
+      } else {
+        for (final catId in uniqueCats) {
+          await _checkBudgetThresholds(catId);
+        }
+      }
+    }
+    return groupId;
+  }
+
   Future<void> _checkBudgetThresholds(int? categoryId) async {
     final budgets = await _db.select(_db.budgets).get();
     if (budgets.isEmpty) return;

@@ -72,6 +72,7 @@ class PocketAllocations extends Table {
 @TableIndex(name: 'idx_tx_category_id', columns: {#categoryId})
 @TableIndex(name: 'idx_tx_type_day_key', columns: {#type, #dayKey})
 @TableIndex(name: 'idx_tx_occurred_at', columns: {#occurredAt})
+@TableIndex(name: 'idx_tx_split_group_id', columns: {#splitGroupId})
 class Transactions extends Table {
   IntColumn get id => integer().autoIncrement()();
   TextColumn get type => text()(); // income | expense | transfer
@@ -91,10 +92,31 @@ class Transactions extends Table {
   IntColumn get fee => integer().withDefault(const Constant(0))();
   TextColumn get note => text().withDefault(const Constant(''))();
   TextColumn get itemName => text().nullable()();
+  TextColumn get splitGroupId => text().nullable()();
+  TextColumn get externalRef => text().nullable()();
   IntColumn get occurredAt => integer()(); // UTC epoch millis
   IntColumn get dayKey => integer()(); // Local yyyymmdd
   IntColumn get createdAt => integer()();
   IntColumn get updatedAt => integer()();
+}
+
+@TableIndex(name: 'idx_qris_drafts_status', columns: {#status})
+class ImportedQrisDrafts extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get emailUid => text().unique()();
+  TextColumn get sender => text()();
+  TextColumn get subject => text()();
+  TextColumn get bankName => text()();
+  TextColumn get merchantName => text()();
+  IntColumn get amount => integer()();
+  IntColumn get occurredAt => integer()(); // UTC epoch millis
+  IntColumn get suggestedWalletId =>
+      integer().nullable().references(Wallets, #id)();
+  TextColumn get rawSnippet => text().withDefault(const Constant(''))();
+  TextColumn get status => text().withDefault(
+    const Constant('pending'),
+  )(); // pending | confirmed | dismissed
+  IntColumn get createdAt => integer()();
 }
 
 @TableIndex(
@@ -304,6 +326,22 @@ class PersonDebtSummary {
 // Database
 // ---------------------------------------------------------------------------
 
+class SplitComponentInput {
+  const SplitComponentInput({
+    required this.itemName,
+    required this.amount,
+    this.categoryId,
+    this.pocketId,
+    this.note = '',
+  });
+
+  final String itemName;
+  final int amount;
+  final int? categoryId;
+  final int? pocketId;
+  final String note;
+}
+
 @DriftDatabase(
   tables: [
     Wallets,
@@ -317,6 +355,7 @@ class PersonDebtSummary {
     Debts,
     DebtPayments,
     Budgets,
+    ImportedQrisDrafts,
   ],
 )
 class AppDatabase extends _$AppDatabase {
@@ -326,7 +365,7 @@ class AppDatabase extends _$AppDatabase {
   /// dan tambahkan langkah migrasi non-destruktif di [migration.onUpgrade]
   /// agar update APK tanpa uninstall tetap mempertahankan seluruh data pengguna.
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -359,6 +398,17 @@ class AppDatabase extends _$AppDatabase {
         );
         await customStatement(
           'CREATE INDEX IF NOT EXISTS idx_tx_to_pocket_id ON transactions (to_pocket_id)',
+        );
+      }
+      if (from < 3) {
+        await m.addColumn(transactions, transactions.splitGroupId);
+        await m.addColumn(transactions, transactions.externalRef);
+        await m.createTable(importedQrisDrafts);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_tx_split_group_id ON transactions (split_group_id)',
+        );
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_qris_drafts_status ON imported_qris_drafts (status)',
         );
       }
     },
@@ -769,6 +819,8 @@ FROM wallet_pockets p
     int fee = 0,
     String note = '',
     String? itemName,
+    String? splitGroupId,
+    String? externalRef,
     required DateTime occurredAt,
     int? existingId,
     bool updateItemMemory = true,
@@ -798,6 +850,12 @@ FROM wallet_pockets p
             fee: Value(fee),
             note: Value(note.trim()),
             itemName: Value(cleanItem),
+            splitGroupId: splitGroupId != null
+                ? Value(splitGroupId)
+                : const Value.absent(),
+            externalRef: externalRef != null
+                ? Value(externalRef)
+                : const Value.absent(),
             occurredAt: Value(occurredMillis),
             dayKey: Value(dayKey),
             updatedAt: Value(nowMillis),
@@ -817,6 +875,8 @@ FROM wallet_pockets p
             fee: Value(fee),
             note: Value(note.trim()),
             itemName: Value(cleanItem),
+            splitGroupId: Value(splitGroupId),
+            externalRef: Value(externalRef),
             occurredAt: occurredMillis,
             dayKey: dayKey,
             createdAt: nowMillis,
@@ -843,6 +903,154 @@ FROM wallet_pockets p
     });
   }
 
+  /// Pecah satu transaksi (atau edit pecahan yang sudah ada) menjadi beberapa komponen
+  /// secara atomik tanpa dobel hitung saldo maupun laporan kategori.
+  Future<String> saveSplitTransactions({
+    required String type,
+    required int walletId,
+    required DateTime occurredAt,
+    required List<SplitComponentInput> components,
+    int? replaceSingleTransactionId,
+    String? existingSplitGroupId,
+    String? externalRef,
+  }) async {
+    if (components.isEmpty) {
+      throw ArgumentError('Minimal harus ada 1 komponen pecahan');
+    }
+    final groupId =
+        existingSplitGroupId ??
+        'split_${DateTime.now().microsecondsSinceEpoch}';
+    final nowMillis = DateTime.now().toUtc().millisecondsSinceEpoch;
+    final occurredMillis = occurredAt.toUtc().millisecondsSinceEpoch;
+    final dayKey = AppDateUtils.toDayKey(occurredAt);
+
+    return transaction(() async {
+      String? preservedRef = externalRef;
+      if (replaceSingleTransactionId != null) {
+        final orig =
+            await (select(transactions)
+                  ..where((t) => t.id.equals(replaceSingleTransactionId)))
+                .getSingleOrNull();
+        preservedRef ??= orig?.externalRef;
+        await (delete(
+          transactions,
+        )..where((t) => t.id.equals(replaceSingleTransactionId))).go();
+      } else if (existingSplitGroupId != null) {
+        final siblings = await (select(
+          transactions,
+        )..where((t) => t.splitGroupId.equals(existingSplitGroupId))).get();
+        if (preservedRef == null) {
+          for (final s in siblings) {
+            if (s.externalRef != null) {
+              preservedRef = s.externalRef;
+              break;
+            }
+          }
+        }
+        await (delete(
+          transactions,
+        )..where((t) => t.splitGroupId.equals(existingSplitGroupId))).go();
+      }
+
+      for (var i = 0; i < components.length; i++) {
+        final comp = components[i];
+        final cleanName = comp.itemName.trim();
+        await into(transactions).insert(
+          TransactionsCompanion.insert(
+            type: type,
+            amount: comp.amount,
+            categoryId: Value(comp.categoryId),
+            walletId: walletId,
+            pocketId: Value(comp.pocketId),
+            note: Value(comp.note.trim()),
+            itemName: Value(cleanName.isEmpty ? null : cleanName),
+            splitGroupId: Value(components.length > 1 ? groupId : null),
+            externalRef: Value(preservedRef),
+            occurredAt: occurredMillis,
+            dayKey: dayKey,
+            createdAt: nowMillis + i,
+            updatedAt: nowMillis + i,
+          ),
+        );
+        if (cleanName.isNotEmpty && (type == 'income' || type == 'expense')) {
+          await upsertItemMemory(
+            displayName: cleanName,
+            type: type,
+            amount: comp.amount,
+            categoryId: comp.categoryId,
+            walletId: walletId,
+            pocketId: comp.pocketId,
+            note: comp.note.trim(),
+          );
+        }
+      }
+
+      return groupId;
+    });
+  }
+
+  Future<List<Transaction>> getTransactionsBySplitGroup(String groupId) {
+    return (select(transactions)
+          ..where((t) => t.splitGroupId.equals(groupId))
+          ..orderBy([(t) => OrderingTerm.asc(t.id)]))
+        .get();
+  }
+
+  // -------------------------------------------------------------------------
+  // Imported QRIS Email Drafts (Antrean Review & Dedup)
+  // -------------------------------------------------------------------------
+
+  Stream<List<ImportedQrisDraft>> watchPendingQrisDrafts() {
+    return (select(importedQrisDrafts)
+          ..where((d) => d.status.equals('pending'))
+          ..orderBy([(d) => OrderingTerm.desc(d.occurredAt)]))
+        .watch();
+  }
+
+  Future<bool> hasImportedEmailUid(String emailUid) async {
+    final row =
+        await (select(importedQrisDrafts)
+              ..where((d) => d.emailUid.equals(emailUid))
+              ..limit(1))
+            .getSingleOrNull();
+    return row != null;
+  }
+
+  Future<int?> insertQrisDraftIfNew({
+    required String emailUid,
+    required String sender,
+    required String subject,
+    required String bankName,
+    required String merchantName,
+    required int amount,
+    required DateTime occurredAt,
+    int? suggestedWalletId,
+    String rawSnippet = '',
+    String status = 'pending',
+  }) async {
+    if (await hasImportedEmailUid(emailUid)) return null;
+    return into(importedQrisDrafts).insert(
+      ImportedQrisDraftsCompanion.insert(
+        emailUid: emailUid,
+        sender: sender,
+        subject: subject,
+        bankName: bankName,
+        merchantName: merchantName,
+        amount: amount,
+        occurredAt: occurredAt.toUtc().millisecondsSinceEpoch,
+        suggestedWalletId: Value(suggestedWalletId),
+        rawSnippet: Value(rawSnippet),
+        status: Value(status),
+        createdAt: DateTime.now().toUtc().millisecondsSinceEpoch,
+      ),
+    );
+  }
+
+  Future<void> markQrisDraftStatus(int draftId, String status) async {
+    await (update(importedQrisDrafts)..where((d) => d.id.equals(draftId)))
+        .write(ImportedQrisDraftsCompanion(status: Value(status)));
+  }
+
   /// Restore transaksi utuh setelah Undo delete.
   Future<int> restoreDeletedTransaction(Transaction tx) {
     return into(transactions).insert(
@@ -858,6 +1066,8 @@ FROM wallet_pockets p
         fee: Value(tx.fee),
         note: Value(tx.note),
         itemName: Value(tx.itemName),
+        splitGroupId: Value(tx.splitGroupId),
+        externalRef: Value(tx.externalRef),
         occurredAt: Value(tx.occurredAt),
         dayKey: Value(tx.dayKey),
         createdAt: Value(tx.createdAt),
@@ -940,7 +1150,9 @@ FROM wallet_pockets p
         t.id AS t_id, t.type AS t_type, t.amount AS t_amount, t.category_id AS t_category_id,
         t.wallet_id AS t_wallet_id, t.to_wallet_id AS t_to_wallet_id,
         t.pocket_id AS t_pocket_id, t.to_pocket_id AS t_to_pocket_id, t.fee AS t_fee,
-        t.note AS t_note, t.item_name AS t_item_name, t.occurred_at AS t_occurred_at,
+        t.note AS t_note, t.item_name AS t_item_name,
+        t.split_group_id AS t_split_group_id, t.external_ref AS t_external_ref,
+        t.occurred_at AS t_occurred_at,
         t.day_key AS t_day_key, t.created_at AS t_created_at, t.updated_at AS t_updated_at,
         w.id AS w_id, w.name AS w_name, w.type AS w_type, w.icon AS w_icon,
         w.color AS w_color, w.initial_balance AS w_initial_balance,
@@ -975,7 +1187,9 @@ FROM wallet_pockets p
         t.id AS t_id, t.type AS t_type, t.amount AS t_amount, t.category_id AS t_category_id,
         t.wallet_id AS t_wallet_id, t.to_wallet_id AS t_to_wallet_id,
         t.pocket_id AS t_pocket_id, t.to_pocket_id AS t_to_pocket_id, t.fee AS t_fee,
-        t.note AS t_note, t.item_name AS t_item_name, t.occurred_at AS t_occurred_at,
+        t.note AS t_note, t.item_name AS t_item_name,
+        t.split_group_id AS t_split_group_id, t.external_ref AS t_external_ref,
+        t.occurred_at AS t_occurred_at,
         t.day_key AS t_day_key, t.created_at AS t_created_at, t.updated_at AS t_updated_at,
         w.id AS w_id, w.name AS w_name, w.type AS w_type, w.icon AS w_icon,
         w.color AS w_color, w.initial_balance AS w_initial_balance,
@@ -1016,6 +1230,8 @@ FROM wallet_pockets p
       fee: r.read<int>('t_fee'),
       note: r.read<String>('t_note'),
       itemName: r.readNullable<String>('t_item_name'),
+      splitGroupId: r.readNullable<String>('t_split_group_id'),
+      externalRef: r.readNullable<String>('t_external_ref'),
       occurredAt: r.read<int>('t_occurred_at'),
       dayKey: r.read<int>('t_day_key'),
       createdAt: r.read<int>('t_created_at'),

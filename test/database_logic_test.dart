@@ -463,4 +463,93 @@ void main() {
       );
     });
   });
+
+  group('Pecah Transaksi (Split Komponen) & Antrean QRIS', () {
+    test('memecah transaksi 20k jadi Es Teh 5k + Nasi Ayam Geprek 15k tanpa dobel hitung & ingat Item Memory', () async {
+      final mandiriId = await createWallet('Mandiri', 500000);
+      final foodCatId = await db.findCategoryIdByName(
+        'Makanan & Minuman',
+        'expense',
+      );
+      final shopCatId = await db.findCategoryIdByName('Belanja', 'expense');
+      final now = DateTime(2026, 11, 26, 12, 0);
+
+      // Simpan transaksi tunggal 20k (mis. hasil QRIS)
+      final origTxId = await db.saveTransactionWithMemory(
+        type: 'expense',
+        amount: 20000,
+        walletId: mandiriId,
+        categoryId: foodCatId,
+        itemName: 'WARUNG GEPREK',
+        externalRef: 'gmail_uid:999',
+        occurredAt: now,
+      );
+      expect((await db.getWalletWithBalance(mandiriId))?.balance, 480000);
+
+      // Pecah menjadi 2 komponen: 5k Es Teh + 15k Nasi Ayam Geprek
+      final groupId = await db.saveSplitTransactions(
+        type: 'expense',
+        walletId: mandiriId,
+        occurredAt: now,
+        replaceSingleTransactionId: origTxId,
+        components: [
+          SplitComponentInput(
+            itemName: 'Es Teh',
+            amount: 5000,
+            categoryId: foodCatId,
+            note: 'QRIS WARUNG GEPREK',
+          ),
+          SplitComponentInput(
+            itemName: 'Nasi Ayam Geprek',
+            amount: 15000,
+            categoryId: shopCatId,
+            note: 'QRIS WARUNG GEPREK',
+          ),
+        ],
+      );
+
+      // Saldo Mandiri tetap 480.000 (tidak dobel hitung!)
+      expect((await db.getWalletWithBalance(mandiriId))?.balance, 480000);
+
+      // Laporan periode tepat 20.000
+      final dayKey = AppDateUtils.toDayKey(now);
+      final summary = await db.getPeriodSummary(dayKey, dayKey);
+      expect(summary.expense, 20000);
+
+      // Kedua komponen tersimpan dengan splitGroupId & externalRef tetap terjaga
+      final siblings = await db.getTransactionsBySplitGroup(groupId);
+      expect(siblings.length, 2);
+      expect(siblings.every((t) => t.externalRef == 'gmail_uid:999'), isTrue);
+
+      // Item memory mengingat Es Teh & Nasi Ayam Geprek
+      final memEsTeh = await db.searchItemMemory('es teh');
+      final memGeprek = await db.searchItemMemory('geprek');
+      expect(memEsTeh.first.lastAmount, 5000);
+      expect(memGeprek.first.lastAmount, 15000);
+
+      // Dedup antrean QRIS: emailUid yang sama tidak masuk dua kali
+      final firstDraft = await db.insertQrisDraftIfNew(
+        emailUid: 'gmail_uid:777',
+        sender: 'livin@bankmandiri.co.id',
+        subject: 'Transaksi QRIS Berhasil',
+        bankName: 'Mandiri',
+        merchantName: 'WARUNG GEPREK',
+        amount: 20000,
+        occurredAt: now,
+        suggestedWalletId: mandiriId,
+      );
+      final dupDraft = await db.insertQrisDraftIfNew(
+        emailUid: 'gmail_uid:777',
+        sender: 'livin@bankmandiri.co.id',
+        subject: 'Transaksi QRIS Berhasil',
+        bankName: 'Mandiri',
+        merchantName: 'WARUNG GEPREK',
+        amount: 20000,
+        occurredAt: now,
+        suggestedWalletId: mandiriId,
+      );
+      expect(firstDraft, isNotNull);
+      expect(dupDraft, isNull);
+    });
+  });
 }

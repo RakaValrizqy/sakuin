@@ -1,17 +1,23 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sakuin/core/services/qris_sync_service.dart';
 import 'package:sakuin/features/budget/budget_screen.dart';
 import 'package:sakuin/features/category/category_list_screen.dart';
 import 'package:sakuin/features/debt/debt_list_screen.dart';
+import 'package:sakuin/features/qris/qris_inbox_screen.dart';
 import 'package:sakuin/features/recurring/recurring_screen.dart';
 import 'package:sakuin/features/settings/backup_screen.dart';
 import 'package:sakuin/features/settings/settings_screen.dart';
 import 'package:sakuin/features/wallet/wallet_list_screen.dart';
 
-class MoreScreen extends StatelessWidget {
+class MoreScreen extends ConsumerWidget {
   const MoreScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pendingQrisCount =
+        ref.watch(pendingQrisDraftsProvider).valueOrNull?.length ?? 0;
+
     void push(Widget screen) {
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
     }
@@ -28,10 +34,28 @@ class MoreScreen extends StatelessWidget {
                   leading: const Icon(Icons.account_balance_wallet_outlined),
                   title: const Text('Saku & Dompet'),
                   subtitle: const Text(
-                    'Kelola dompet, transfer, koreksi saldo',
+                    'Kelola dompet, pos budget, transfer, koreksi saldo',
                   ),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => push(const WalletListScreen()),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.qr_code_2_rounded),
+                  title: const Text('Auto QRIS (Gmail)'),
+                  subtitle: const Text(
+                    'Tarik pengeluaran QRIS dari email Gmail & pecah item',
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (pendingQrisCount > 0)
+                        Badge.count(count: pendingQrisCount),
+                      const SizedBox(width: 4),
+                      const Icon(Icons.chevron_right_rounded),
+                    ],
+                  ),
+                  onTap: () => push(const QrisInboxScreen()),
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -88,7 +112,7 @@ class MoreScreen extends StatelessWidget {
                   leading: const Icon(Icons.settings_outlined),
                   title: const Text('Pengaturan'),
                   subtitle: const Text(
-                    'Tanggal periode, tema, PIN & biometrik, pengingat',
+                    'Tanggal periode, tema, PIN & biometrik, pembaruan',
                   ),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => push(const SettingsScreen()),

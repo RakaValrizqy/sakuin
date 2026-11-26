@@ -1,5 +1,14 @@
 # Catatan Rilis Sakuin
 
+## v1.2.0
+### Apa yang Baru
+- **Auto Catat Pengeluaran dari Email QRIS (Gmail):** Hubungkan Gmail memakai App Password (16 huruf, tanpa setup Google Cloud Console & tidak perlu login ulang tiap 7 hari). Sakuin membaca email QRIS dari Mandiri/Livin', BCA, BRI, BNI, BSI, GoPay, OVO, DANA, ShopeePay, SeaBank, Jago, dll. dalam mode *read-only* lalu memasukkannya ke **Antrean Review QRIS** (tersedia juga opsi langsung simpan otomatis).
+- **Pecah Transaksi (Split Komponen):** Dari satu transaksi (baik dari email QRIS maupun input manual), kini bisa dipecah menjadi beberapa komponen item (mis. Rp 20.000 → Es Teh Rp 5.000 + Nasi Ayam Geprek Rp 15.000) dengan tombol cepat **Isi Sisa**, **Bagi Rata**, kategori & pos budget masing-masing komponen, tanpa dobel hitung di saldo maupun laporan.
+
+### Peningkatan & Migrasi
+- Migrasi database non-destruktif (`v2 → v3`) agar seluruh data lama tetap aman saat update tanpa uninstall.
+- Backup & Restore `.json` diperbarui ke format v3 untuk menyertakan info pecahan transaksi (tetap kompatibel dengan cadangan v1 & v2).
+
 ## v1.1.0
 ### Apa yang Baru
 - **Logo & Ikon Sakuin Baru:** Ikon dompet/saku modern bertema emerald-teal dengan dukungan Adaptive Icon & Material You.

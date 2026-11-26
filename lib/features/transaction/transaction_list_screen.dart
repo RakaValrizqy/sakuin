@@ -8,6 +8,7 @@ import 'package:sakuin/core/utils/haptics.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/core/widgets/empty_state.dart';
 import 'package:sakuin/features/category/category_providers.dart';
+import 'package:sakuin/features/transaction/split_transaction_sheet.dart';
 import 'package:sakuin/features/transaction/transaction_form_sheet.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
 import 'package:sakuin/features/transaction/widgets/transaction_tile.dart';
@@ -83,6 +84,16 @@ class _TransactionListScreenState extends ConsumerState<TransactionListScreen> {
               title: const Text('Edit transaksi'),
               onTap: () => Navigator.pop(ctx, 'edit'),
             ),
+            if (tx.type != 'transfer')
+              ListTile(
+                leading: const Icon(Icons.call_split_rounded),
+                title: Text(
+                  tx.splitGroupId != null
+                      ? 'Edit pecahan transaksi'
+                      : 'Pecah jadi beberapa komponen',
+                ),
+                onTap: () => Navigator.pop(ctx, 'split'),
+              ),
             ListTile(
               leading: const Icon(Icons.copy_rounded),
               title: const Text('Duplikat ke hari ini'),
@@ -113,6 +124,8 @@ class _TransactionListScreenState extends ConsumerState<TransactionListScreen> {
     switch (action) {
       case 'edit':
         await showTransactionFormSheet(context, existing: detail);
+      case 'split':
+        await showSplitExistingTransactionSheet(context, detail: detail);
       case 'duplicate':
         await showTransactionFormSheet(context, duplicateFrom: detail);
       case 'pin':
