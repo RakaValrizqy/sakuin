@@ -27,6 +27,7 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
   bool _autoSaveWithoutReview = false;
   int _lookbackDays = 14;
   int? _defaultWalletId;
+  int? _ignoreOnOrBeforeDayKey;
   bool _obscurePass = true;
   bool _testingOrSaving = false;
   bool _syncing = false;
@@ -56,6 +57,7 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
       _autoSaveWithoutReview = cfg.autoSaveWithoutReview;
       _lookbackDays = cfg.lookbackDays;
       _defaultWalletId = cfg.defaultWalletId;
+      _ignoreOnOrBeforeDayKey = cfg.ignoreOnOrBeforeDayKey;
       _showSetupForm = !cfg.isConfigured;
       _loadingConfig = false;
     });
@@ -94,6 +96,7 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
           autoSaveWithoutReview: _autoSaveWithoutReview,
           lookbackDays: _lookbackDays,
           defaultWalletId: _defaultWalletId,
+          ignoreOnOrBeforeDayKey: _ignoreOnOrBeforeDayKey,
         ),
       );
       if (!mounted) return;
@@ -127,8 +130,94 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
             autoSaveWithoutReview: _autoSaveWithoutReview,
             lookbackDays: _lookbackDays,
             defaultWalletId: _defaultWalletId,
+            ignoreOnOrBeforeDayKey: _ignoreOnOrBeforeDayKey,
           ),
         );
+  }
+
+  Future<void> _pickIgnoreCutoffDate() async {
+    final now = DateTime.now();
+    final initial = _ignoreOnOrBeforeDayKey != null
+        ? AppDateUtils.fromDayKey(_ignoreOnOrBeforeDayKey!)
+        : now;
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial.isAfter(now) ? now : initial,
+      firstDate: DateTime(2020),
+      lastDate: now,
+      helpText: 'Abaikan transaksi pada & sebelum tanggal ini',
+    );
+    if (picked == null || !mounted) return;
+
+    final dayKey = AppDateUtils.toDayKey(picked);
+    setState(() => _ignoreOnOrBeforeDayKey = dayKey);
+    await _savePreferencesOnly();
+
+    if (!mounted) return;
+    final pending = ref.read(pendingQrisDraftsProvider).valueOrNull ?? const [];
+    final affectedCount = pending.where((d) {
+      final dt = DateTime.fromMillisecondsSinceEpoch(d.occurredAt).toLocal();
+      return QrisSyncService.shouldIgnoreTransactionDate(dt, dayKey);
+    }).length;
+
+    final dateLabel = AppDateUtils.formatShortDate(picked);
+    if (affectedCount > 0) {
+      final cleanNow = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Bersihkan antrean lama?'),
+          content: Text(
+            'Ada $affectedCount transaksi di antrean review dari tanggal $dateLabel dan sebelumnya. '
+            'Hapus dari antrean sekarang?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Biarkan'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Bersihkan'),
+            ),
+          ],
+        ),
+      );
+      if (cleanNow == true) {
+        final removed = await ref
+            .read(qrisSyncServiceProvider)
+            .dismissPendingDraftsOnOrBefore(dayKey);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Batas diatur ($dateLabel) & $removed antrean lama dibersihkan',
+              ),
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Transaksi pada $dateLabel dan sebelumnya tidak akan diperiksa',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _clearIgnoreCutoffDate() async {
+    setState(() => _ignoreOnOrBeforeDayKey = null);
+    await _savePreferencesOnly();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Batas tanggal sinkron dihapus')),
+      );
+    }
   }
 
   Future<void> _syncNow() async {
@@ -395,6 +484,45 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                               child: const Text('Sinkron'),
                             )
                           : null,
+                    ),
+                  ),
+
+                  // Batas Tanggal Sinkron Email (selalu mudah diakses)
+                  const SizedBox(height: 10),
+                  Card(
+                    child: ListTile(
+                      leading: Icon(
+                        Icons.event_busy_rounded,
+                        color: _ignoreOnOrBeforeDayKey != null
+                            ? cs.primary
+                            : cs.onSurfaceVariant,
+                      ),
+                      title: const Text('Batas Tanggal Sinkron'),
+                      subtitle: Text(
+                        _ignoreOnOrBeforeDayKey != null
+                            ? 'Abaikan transaksi pada ${AppDateUtils.formatShortDate(AppDateUtils.fromDayKey(_ignoreOnOrBeforeDayKey!))} & sebelumnya (hanya setelahnya yang diperiksa)'
+                            : 'Belum diatur — semua email dalam rentang $_lookbackDays hari terakhir diperiksa',
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (_ignoreOnOrBeforeDayKey != null)
+                            IconButton(
+                              tooltip: 'Hapus batas tanggal',
+                              icon: const Icon(Icons.close_rounded, size: 20),
+                              onPressed: _clearIgnoreCutoffDate,
+                            ),
+                          TextButton(
+                            onPressed: _pickIgnoreCutoffDate,
+                            child: Text(
+                              _ignoreOnOrBeforeDayKey != null
+                                  ? 'Ubah'
+                                  : 'Pilih',
+                            ),
+                          ),
+                        ],
+                      ),
+                      onTap: _pickIgnoreCutoffDate,
                     ),
                   ),
 

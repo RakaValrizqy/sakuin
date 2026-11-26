@@ -13,11 +13,10 @@ import 'package:sakuin/features/debt/debt_list_screen.dart';
 import 'package:sakuin/features/debt/debt_providers.dart';
 import 'package:sakuin/features/qris/qris_inbox_screen.dart';
 import 'package:sakuin/features/recurring/recurring_service.dart';
-import 'package:sakuin/features/report/report_screen.dart';
 import 'package:sakuin/features/transaction/transaction_form_sheet.dart';
+import 'package:sakuin/features/transaction/transaction_list_screen.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
 import 'package:sakuin/features/transaction/widgets/transaction_tile.dart';
-import 'package:sakuin/features/wallet/wallet_list_screen.dart';
 import 'package:sakuin/features/wallet/wallet_providers.dart';
 
 final currentPeriodSummaryProvider = StreamProvider<PeriodSummary>((ref) {
@@ -28,16 +27,7 @@ final currentPeriodSummaryProvider = StreamProvider<PeriodSummary>((ref) {
 });
 
 class HomeScreen extends ConsumerWidget {
-  const HomeScreen({
-    super.key,
-    required this.onSeeAllTransactions,
-    this.onOpenWallets,
-    this.onOpenDebts,
-  });
-
-  final VoidCallback onSeeAllTransactions;
-  final VoidCallback? onOpenWallets;
-  final VoidCallback? onOpenDebts;
+  const HomeScreen({super.key});
 
   Future<void> _onQuickItemTap(
     BuildContext context,
@@ -96,8 +86,6 @@ class HomeScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final totalBalance = ref.watch(totalBalanceProvider);
-    final wallets =
-        ref.watch(walletsWithBalancesProvider).valueOrNull ?? const [];
     final summary =
         ref.watch(currentPeriodSummaryProvider).valueOrNull ??
         const PeriodSummary(income: 0, expense: 0);
@@ -123,6 +111,17 @@ class HomeScreen extends ConsumerWidget {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
 
+    void openTransactions() {
+      Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => const TransactionListScreen()));
+    }
+
+    void openDebts() {
+      Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => const DebtListScreen()));
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -136,12 +135,6 @@ class HomeScreen extends ConsumerWidget {
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: 'Laporan & Grafik',
-            icon: const Icon(Icons.bar_chart_rounded),
-            onPressed: () => Navigator.of(context)
-                .push(MaterialPageRoute(builder: (_) => const ReportScreen())),
-          ),
           IconButton(
             tooltip: hideBalances ? 'Tampilkan saldo' : 'Sembunyikan saldo',
             icon: Icon(
@@ -241,24 +234,14 @@ class HomeScreen extends ConsumerWidget {
               ),
           ],
 
-          // 3. Kartu Akses Cepat: Saku & Hutang
+          // 3. Sub-Menu Beranda: Transaksi & Hutang
           Row(
             children: [
               Expanded(
                 child: Card(
                   child: InkWell(
                     borderRadius: BorderRadius.circular(18),
-                    onTap: () {
-                      if (onOpenWallets != null) {
-                        onOpenWallets!();
-                      } else {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const WalletListScreen(),
-                          ),
-                        );
-                      }
-                    },
+                    onTap: openTransactions,
                     child: Padding(
                       padding: const EdgeInsets.all(14),
                       child: Column(
@@ -267,29 +250,31 @@ class HomeScreen extends ConsumerWidget {
                           Row(
                             children: [
                               Icon(
-                                Icons.account_balance_wallet_rounded,
+                                Icons.receipt_long_rounded,
                                 size: 20,
                                 color: cs.primary,
                               ),
                               const SizedBox(width: 8),
-                              Text('Saku', style: tt.titleSmall),
+                              Expanded(
+                                child: Text('Transaksi', style: tt.titleSmall),
+                              ),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                size: 18,
+                                color: cs.onSurfaceVariant,
+                              ),
                             ],
                           ),
                           const SizedBox(height: 8),
                           Text(
-                            '${wallets.length} dompet aktif',
+                            'Semua Riwayat',
                             style: tt.titleMedium?.copyWith(
                               fontWeight: FontWeight.w700,
                             ),
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            wallets.isEmpty
-                                ? 'Ketuk untuk tambah'
-                                : wallets
-                                      .take(2)
-                                      .map((w) => w.wallet.name)
-                                      .join(', '),
+                            'Cari, filter, & pecah item',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: tt.bodySmall?.copyWith(
@@ -307,17 +292,7 @@ class HomeScreen extends ConsumerWidget {
                 child: Card(
                   child: InkWell(
                     borderRadius: BorderRadius.circular(18),
-                    onTap: () {
-                      if (onOpenDebts != null) {
-                        onOpenDebts!();
-                      } else {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => const DebtListScreen(),
-                          ),
-                        );
-                      }
-                    },
+                    onTap: openDebts,
                     child: Padding(
                       padding: const EdgeInsets.all(14),
                       child: Column(
@@ -331,7 +306,14 @@ class HomeScreen extends ConsumerWidget {
                                 color: cs.primary,
                               ),
                               const SizedBox(width: 8),
-                              Text('Hutang', style: tt.titleSmall),
+                              Expanded(
+                                child: Text('Hutang', style: tt.titleSmall),
+                              ),
+                              Icon(
+                                Icons.chevron_right_rounded,
+                                size: 18,
+                                color: cs.onSurfaceVariant,
+                              ),
                             ],
                           ),
                           const SizedBox(height: 8),
@@ -437,7 +419,7 @@ class HomeScreen extends ConsumerWidget {
             children: [
               Text('Transaksi Terbaru', style: tt.titleMedium),
               TextButton(
-                onPressed: onSeeAllTransactions,
+                onPressed: openTransactions,
                 child: const Text('Lihat semua'),
               ),
             ],

@@ -6,13 +6,12 @@ import 'package:sakuin/core/services/security_service.dart';
 import 'package:sakuin/core/services/settings_service.dart';
 import 'package:sakuin/core/services/update_service.dart';
 import 'package:sakuin/core/utils/haptics.dart';
-import 'package:sakuin/features/debt/debt_list_screen.dart';
 import 'package:sakuin/features/home/home_screen.dart';
 import 'package:sakuin/features/recurring/recurring_service.dart';
+import 'package:sakuin/features/report/report_screen.dart';
 import 'package:sakuin/features/settings/more_screen.dart';
 import 'package:sakuin/features/settings/update_sheet.dart';
 import 'package:sakuin/features/transaction/transaction_form_sheet.dart';
-import 'package:sakuin/features/transaction/transaction_list_screen.dart';
 import 'package:sakuin/features/wallet/wallet_list_screen.dart';
 
 class NavigationShell extends ConsumerStatefulWidget {
@@ -75,21 +74,16 @@ class _NavigationShellState extends ConsumerState<NavigationShell> {
     final pendingQrisCount =
         ref.watch(pendingQrisDraftsProvider).valueOrNull?.length ?? 0;
 
-    final screens = [
-      HomeScreen(
-        onSeeAllTransactions: () => setState(() => _tabIndex = 1),
-        onOpenWallets: () => setState(() => _tabIndex = 2),
-        onOpenDebts: () => setState(() => _tabIndex = 3),
-      ),
-      const TransactionListScreen(),
-      const WalletListScreen(),
-      const DebtListScreen(),
-      const MoreScreen(),
+    final screens = const [
+      HomeScreen(),
+      WalletListScreen(),
+      ReportScreen(),
+      MoreScreen(),
     ];
 
-    // Tampilkan FAB "+ Transaksi" di Beranda & Transaksi saja agar tidak menimpa
-    // FAB milik tab Dompet ("+ Dompet Baru") & tab Hutang ("+ Catat Hutang").
-    final showAddTransactionFab = _tabIndex == 0 || _tabIndex == 1;
+    // Tampilkan FAB "+ Catat" di Beranda saja agar tidak menimpa
+    // FAB milik tab Dompet ("+ Dompet Baru").
+    final showAddTransactionFab = _tabIndex == 0;
 
     return Scaffold(
       body: IndexedStack(index: _tabIndex, children: screens),
@@ -118,19 +112,14 @@ class _NavigationShellState extends ConsumerState<NavigationShell> {
             label: 'Beranda',
           ),
           const NavigationDestination(
-            icon: Icon(Icons.receipt_long_outlined),
-            selectedIcon: Icon(Icons.receipt_long_rounded),
-            label: 'Transaksi',
-          ),
-          const NavigationDestination(
             icon: Icon(Icons.account_balance_wallet_outlined),
             selectedIcon: Icon(Icons.account_balance_wallet_rounded),
             label: 'Dompet',
           ),
           const NavigationDestination(
-            icon: Icon(Icons.handshake_outlined),
-            selectedIcon: Icon(Icons.handshake_rounded),
-            label: 'Hutang',
+            icon: Icon(Icons.bar_chart_outlined),
+            selectedIcon: Icon(Icons.bar_chart_rounded),
+            label: 'Laporan',
           ),
           NavigationDestination(
             icon: Badge(

@@ -1,5 +1,10 @@
 # Catatan Rilis Sakuin
 
+## v1.4.0
+### Apa yang Baru
+- **Batas Tanggal Sinkron Email QRIS:** Kini bisa mengatur tanggal batas di menu **Auto QRIS (Gmail)** (mis. pilih 25 November → transaksi pada tanggal 25 November dan sebelumnya tidak akan diperiksa maupun dimasukkan ke antrean review, lengkap dengan opsi membersihkan antrean lama yang sudah terlanjur masuk).
+- **Navigasi Menu Utama Lebih Ringkas:** Bilah navigasi bawah kini berisi **Beranda • Dompet • Laporan • Lainnya**. Menu **Transaksi** dan **Hutang-Piutang** tersedia sebagai sub-menu cepat di **Beranda** (di samping kartu Total Saldo, Item Cepat, dan Transaksi Terbaru) serta di urutan atas tab **Lainnya**.
+
 ## v1.3.0
 ### Apa yang Baru
 - **Dompet & Hutang di Menu Utama (Navbar):** Dompet dan Hutang-Piutang kini bisa langsung diakses dari bilah navigasi bawah (Beranda, Transaksi, Dompet, Hutang, Lainnya), sedangkan Laporan & Grafik tersedia di ikon atas Beranda dan tab Lainnya.

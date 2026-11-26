@@ -321,6 +321,17 @@ class _TransactionListScreenState extends ConsumerState<TransactionListScreen> {
     final dayKeys = grouped.keys.toList();
 
     return Scaffold(
+      floatingActionButton: selectionMode
+          ? null
+          : FloatingActionButton.extended(
+              tooltip: 'Tambah transaksi',
+              onPressed: () {
+                AppHaptics.light(ref.read(settingsProvider).hapticsEnabled);
+                showTransactionFormSheet(context);
+              },
+              icon: const Icon(Icons.add_rounded),
+              label: const Text('Catat'),
+            ),
       appBar: selectionMode
           ? AppBar(
               leading: IconButton(

@@ -109,8 +109,8 @@ class UpdateService {
                 .toList() ??
             const ['arm64-v8a'];
         return AppVersionInfo(
-          versionName: (raw['versionName'] as String?) ?? '1.3.0',
-          versionCode: (raw['versionCode'] as int?) ?? 4,
+          versionName: (raw['versionName'] as String?) ?? '1.4.0',
+          versionCode: (raw['versionCode'] as int?) ?? 5,
           supportedAbis: abis,
         );
       }
@@ -118,8 +118,8 @@ class UpdateService {
       // Fallback di lingkungan non-Android / unit test.
     }
     return const AppVersionInfo(
-      versionName: '1.3.0',
-      versionCode: 4,
+      versionName: '1.4.0',
+      versionCode: 5,
       supportedAbis: ['arm64-v8a'],
     );
   }

@@ -4,11 +4,12 @@ import 'package:sakuin/core/services/qris_sync_service.dart';
 import 'package:sakuin/core/services/update_service.dart';
 import 'package:sakuin/features/budget/budget_screen.dart';
 import 'package:sakuin/features/category/category_list_screen.dart';
+import 'package:sakuin/features/debt/debt_list_screen.dart';
 import 'package:sakuin/features/qris/qris_inbox_screen.dart';
 import 'package:sakuin/features/recurring/recurring_screen.dart';
-import 'package:sakuin/features/report/report_screen.dart';
 import 'package:sakuin/features/settings/backup_screen.dart';
 import 'package:sakuin/features/settings/settings_screen.dart';
+import 'package:sakuin/features/transaction/transaction_list_screen.dart';
 
 class MoreScreen extends ConsumerWidget {
   const MoreScreen({super.key});
@@ -34,13 +35,23 @@ class MoreScreen extends ConsumerWidget {
             child: Column(
               children: [
                 ListTile(
-                  leading: const Icon(Icons.bar_chart_rounded),
-                  title: const Text('Laporan & Grafik'),
+                  leading: const Icon(Icons.receipt_long_rounded),
+                  title: const Text('Transaksi'),
                   subtitle: const Text(
-                    'Ringkasan periode, donut kategori, tren, ekspor CSV/PDF',
+                    'Riwayat lengkap, cari, filter, & pecah item',
                   ),
                   trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => push(const ReportScreen()),
+                  onTap: () => push(const TransactionListScreen()),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.handshake_rounded),
+                  title: const Text('Hutang & Piutang'),
+                  subtitle: const Text(
+                    'Pinjaman, cicilan, & saldo bersih per teman',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => push(const DebtListScreen()),
                 ),
                 const Divider(height: 1),
                 ListTile(

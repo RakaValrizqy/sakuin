@@ -3,6 +3,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:sakuin/core/db/app_database.dart';
 import 'package:sakuin/core/db/db_provider.dart';
 import 'package:sakuin/core/services/gmail_imap_client.dart';
+import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/utils/qris_email_parser.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
 
@@ -15,6 +16,7 @@ class GmailQrisConfig {
     this.autoSaveWithoutReview = false,
     this.lookbackDays = 14,
     this.defaultWalletId,
+    this.ignoreOnOrBeforeDayKey,
   });
 
   final String email;
@@ -24,6 +26,10 @@ class GmailQrisConfig {
   final bool autoSaveWithoutReview;
   final int lookbackDays;
   final int? defaultWalletId;
+
+  /// Batas tanggal (format YYYYMMDD) yang diabaikan saat sinkron email.
+  /// Contoh: 20261125 -> transaksi pada 25 Nov 2026 dan sebelumnya tidak diperiksa/dimasukkan.
+  final int? ignoreOnOrBeforeDayKey;
 
   bool get isConfigured =>
       enabled && email.trim().isNotEmpty && appPassword.trim().isNotEmpty;
@@ -60,11 +66,39 @@ class QrisSyncService {
   static const _kAutoSave = 'sakuin_gmail_auto_save';
   static const _kLookbackDays = 'sakuin_gmail_lookback_days';
   static const _kDefaultWalletId = 'sakuin_gmail_default_wallet_id';
+  static const _kIgnoreOnOrBeforeDayKey = 'sakuin_gmail_ignore_cutoff_day';
 
   final Ref _ref;
   final FlutterSecureStorage _storage;
 
   AppDatabase get _db => _ref.read(appDatabaseProvider);
+
+  /// Mengembalikan true jika [occurredAt] berada pada atau sebelum [ignoreOnOrBeforeDayKey]
+  /// sehingga transaksi harus dilewati dan tidak masuk antrean review.
+  static bool shouldIgnoreTransactionDate(
+    DateTime occurredAt,
+    int? ignoreOnOrBeforeDayKey,
+  ) {
+    if (ignoreOnOrBeforeDayKey == null) return false;
+    return AppDateUtils.toDayKey(occurredAt.toLocal()) <=
+        ignoreOnOrBeforeDayKey;
+  }
+
+  /// Menghitung tanggal `SINCE` paling efisien untuk query IMAP Gmail,
+  /// dengan memperhitungkan perbedaan zona waktu server (UTC/PST vs WIB)
+  /// agar email dini hari setelah batas tanggal tidak terlewat.
+  static DateTime computeImapSinceDate({
+    required DateTime now,
+    required int lookbackDays,
+    int? ignoreOnOrBeforeDayKey,
+  }) {
+    final today = DateTime(now.year, now.month, now.day);
+    final lookbackSince = today.subtract(Duration(days: lookbackDays));
+    if (ignoreOnOrBeforeDayKey == null) return lookbackSince;
+
+    final cutoffDate = AppDateUtils.fromDayKey(ignoreOnOrBeforeDayKey);
+    return cutoffDate.isAfter(lookbackSince) ? cutoffDate : lookbackSince;
+  }
 
   Future<GmailQrisConfig> loadConfig() async {
     try {
@@ -78,6 +112,9 @@ class QrisSyncService {
       final defaultWallet = int.tryParse(
         await _storage.read(key: _kDefaultWalletId) ?? '',
       );
+      final ignoreCutoffDay = int.tryParse(
+        await _storage.read(key: _kIgnoreOnOrBeforeDayKey) ?? '',
+      );
       return GmailQrisConfig(
         email: email,
         appPassword: pass,
@@ -86,6 +123,7 @@ class QrisSyncService {
         autoSaveWithoutReview: autoSave,
         lookbackDays: lookback,
         defaultWalletId: defaultWallet,
+        ignoreOnOrBeforeDayKey: ignoreCutoffDay,
       );
     } catch (_) {
       return const GmailQrisConfig();
@@ -119,6 +157,14 @@ class QrisSyncService {
     } else {
       await _storage.delete(key: _kDefaultWalletId);
     }
+    if (config.ignoreOnOrBeforeDayKey != null) {
+      await _storage.write(
+        key: _kIgnoreOnOrBeforeDayKey,
+        value: config.ignoreOnOrBeforeDayKey.toString(),
+      );
+    } else {
+      await _storage.delete(key: _kIgnoreOnOrBeforeDayKey);
+    }
   }
 
   Future<void> disconnect() async {
@@ -150,6 +196,7 @@ class QrisSyncService {
         appPassword: config.appPassword,
         lookbackDays: config.lookbackDays,
         alreadyImportedUids: seenUids,
+        ignoreOnOrBeforeDayKey: config.ignoreOnOrBeforeDayKey,
       );
       if (rawMessages.isEmpty) return const QrisSyncResult();
 
@@ -172,6 +219,12 @@ class QrisSyncService {
           emailDate: msg.date,
         );
         if (parsed == null) continue;
+        if (shouldIgnoreTransactionDate(
+          parsed.occurredAt,
+          config.ignoreOnOrBeforeDayKey,
+        )) {
+          continue;
+        }
 
         final matchedWalletId = _matchWallet(
           wallets,
@@ -280,4 +333,21 @@ class QrisSyncService {
 
   Future<void> dismissDraft(int draftId) =>
       _db.markQrisDraftStatus(draftId, 'dismissed');
+
+  /// Abaikan seluruh antrean review pending yang tanggal transaksinya <= [cutoffDayKey].
+  Future<int> dismissPendingDraftsOnOrBefore(int cutoffDayKey) async {
+    final pending = await (_db.select(
+      _db.importedQrisDrafts,
+    )..where((d) => d.status.equals('pending'))).get();
+    var removed = 0;
+    for (final draft in pending) {
+      final occurred = DateTime.fromMillisecondsSinceEpoch(draft.occurredAt)
+          .toLocal();
+      if (shouldIgnoreTransactionDate(occurred, cutoffDayKey)) {
+        await _db.markQrisDraftStatus(draft.id, 'dismissed');
+        removed++;
+      }
+    }
+    return removed;
+  }
 }

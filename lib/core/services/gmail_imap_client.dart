@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/utils/qris_email_parser.dart';
 
 class GmailRawMessage {
@@ -203,11 +204,14 @@ class GmailImapClient {
 
   /// Tarik email kandidat transaksi QRIS dari INBOX dalam [lookbackDays] hari terakhir.
   /// [alreadyImportedUids] dilewati sebelum mengunduh body agar cepat dan hemat kuota.
+  /// Jika [ignoreOnOrBeforeDayKey] diatur (YYYYMMDD), email pada tanggal tersebut dan sebelumnya
+  /// tidak akan diunduh atau diperiksa.
   Future<List<GmailRawMessage>> fetchRecentQrisEmails({
     required String email,
     required String appPassword,
     required int lookbackDays,
     required Set<String> alreadyImportedUids,
+    int? ignoreOnOrBeforeDayKey,
     int maxScanHeaders = 80,
   }) async {
     try {
@@ -215,7 +219,15 @@ class GmailImapClient {
       await _login(email, appPassword);
       await _sendCommand('EXAMINE INBOX');
 
-      final since = DateTime.now().subtract(Duration(days: lookbackDays));
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      var since = today.subtract(Duration(days: lookbackDays));
+      if (ignoreOnOrBeforeDayKey != null) {
+        final cutoffDate = AppDateUtils.fromDayKey(ignoreOnOrBeforeDayKey);
+        if (cutoffDate.isAfter(since)) {
+          since = cutoffDate;
+        }
+      }
       const imapMonths = [
         'Jan',
         'Feb',
@@ -266,9 +278,13 @@ class GmailImapClient {
       );
       final headers = _parseHeaderFetch(headerLines);
 
-      final candidates = headers
-          .where((h) => QrisEmailParser.isLikelyQrisHeader(h.from, h.subject))
-          .toList();
+      final candidates = headers.where((h) {
+        if (ignoreOnOrBeforeDayKey != null && h.date != null) {
+          final headerDay = AppDateUtils.toDayKey(h.date!.toLocal());
+          if (headerDay <= ignoreOnOrBeforeDayKey) return false;
+        }
+        return QrisEmailParser.isLikelyQrisHeader(h.from, h.subject);
+      }).toList();
       if (candidates.isEmpty) return const [];
 
       final results = <GmailRawMessage>[];
