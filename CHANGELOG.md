@@ -1,5 +1,10 @@
 # Catatan Rilis Sakuin
 
+## v1.5.3
+### Peningkatan & Perbaikan
+- **Deteksi Email QRIS (Gmail) Lebih Akurat & Luas:** Memperbesar batas baca isi email HTML bank dari 32 KB ke 128 KB (agar struk email panjang tidak terpotong), menaikkan batas scan dari 80 ke 200 email terbaru, memperluas dukungan bank & subjek resi, serta mencegah disclaimer footer bank (seperti kata *"gagal"* atau *"promo"*) menolak struk QRIS yang sebenarnya berhasil.
+- **Pecah Transaksi Pakai Istilah "Item" + Saran Nama Otomatis:** Seluruh label *"Komponen"* di layar Pecah Transaksi diganti menjadi **"Item"**, dan kolom nama item kini menampilkan saran (*suggestion chips*) otomatis berdasarkan riwayat item yang pernah kamu input (lengkap dengan pengisian otomatis harga terakhir & kategori saat diketuk).
+
 ## v1.5.2
 ### Perbaikan
 - **Perbaikan Filter Batas Tanggal Auto QRIS (Gmail):** Antrean lama yang dibersihkan saat mengatur batas tanggal kini dihapus bersih (tidak ditandai *dismissed* permanen), sehingga ketika batas tanggal dimundurkan (mis. dari 26 Nov ke 25 Nov) atau dihapus, transaksi setelah batas baru otomatis muncul kembali & langsung disinkron ulang. Ditambahkan juga tombol **Pulihkan** (`↺`) di pojok atas layar Auto QRIS untuk mengembalikan transaksi yang sempat tersembunyi sebelumnya.

@@ -89,8 +89,8 @@ class _TransactionListScreenState extends ConsumerState<TransactionListScreen> {
                 leading: const Icon(Icons.call_split_rounded),
                 title: Text(
                   tx.splitGroupId != null
-                      ? 'Edit pecahan transaksi'
-                      : 'Pecah jadi beberapa komponen',
+                      ? 'Edit pecahan item transaksi'
+                      : 'Pecah jadi beberapa item',
                 ),
                 onTap: () => Navigator.pop(ctx, 'split'),
               ),

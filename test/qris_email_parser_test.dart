@@ -102,5 +102,28 @@ void main() {
       expect(dt, isNotNull);
       expect(dt!.toUtc(), DateTime.utc(2026, 11, 26, 5, 30, 0));
     });
+
+    test('does not reject successful QRIS receipts that mention gagal or promo in footer', () {
+      const from = 'SeaBank Indonesia <no-reply@seabank.co.id>';
+      const subject = 'Resi Transaksi Pembayaran';
+      const body = '''
+      Status: Berhasil
+      Pembayaran QRIS ke Merchant: ALFAMART SUDIRMAN
+      Total Pembayaran: Rp 32.500,-
+      Diskon Promo : Rp 0
+      Jika transaksi gagal atau tidak sesuai, hubungi CS SeaBank.
+      ''';
+
+      expect(QrisEmailParser.isLikelyQrisHeader(from, subject), isTrue);
+      final parsed = QrisEmailParser.parse(
+        from: from,
+        subject: subject,
+        rawBody: body,
+      );
+      expect(parsed, isNotNull);
+      expect(parsed!.bankName, 'SeaBank');
+      expect(parsed.merchantName, 'ALFAMART SUDIRMAN');
+      expect(parsed.amount, 32500);
+    });
   });
 }

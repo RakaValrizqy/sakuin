@@ -68,11 +68,13 @@ class _SplitRowData {
     String note = '',
   }) : nameCtrl = TextEditingController(text: name),
        amountCtrl = TextEditingController(text: amountText),
-       noteCtrl = TextEditingController(text: note);
+       noteCtrl = TextEditingController(text: note),
+       nameFocus = FocusNode();
 
   final TextEditingController nameCtrl;
   final TextEditingController amountCtrl;
   final TextEditingController noteCtrl;
+  final FocusNode nameFocus;
   int? categoryId;
   int? pocketId;
 
@@ -82,6 +84,7 @@ class _SplitRowData {
     nameCtrl.dispose();
     amountCtrl.dispose();
     noteCtrl.dispose();
+    nameFocus.dispose();
   }
 }
 
@@ -121,6 +124,8 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
   int? _replaceSingleTxId;
   bool _loading = true;
   bool _saving = false;
+  List<ItemMemoryData> _allItemHistory = const [];
+  int? _focusedRowIndex;
 
   @override
   void initState() {
@@ -201,7 +206,70 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
       _rows.add(_SplitRowData(categoryId: defaultCatId, note: noteStr));
     }
 
+    _allItemHistory = await ref
+        .read(appDatabaseProvider)
+        .searchItemMemory('', type: _type, limit: 40);
+
+    for (var i = 0; i < _rows.length; i++) {
+      _attachFocusListener(_rows[i]);
+    }
+
     if (mounted) setState(() => _loading = false);
+  }
+
+  void _attachFocusListener(_SplitRowData row) {
+    row.nameFocus.addListener(() {
+      if (!mounted) return;
+      final idx = _rows.indexOf(row);
+      if (row.nameFocus.hasFocus && idx >= 0) {
+        setState(() => _focusedRowIndex = idx);
+      } else if (!row.nameFocus.hasFocus && _focusedRowIndex == idx) {
+        setState(() => _focusedRowIndex = null);
+      }
+    });
+  }
+
+  List<ItemMemoryData> _suggestionsForRow(_SplitRowData row) {
+    if (_allItemHistory.isEmpty) return const [];
+    final q = row.nameCtrl.text.trim().toLowerCase();
+    if (q.isEmpty) {
+      return _allItemHistory.take(6).toList();
+    }
+    return _allItemHistory
+        .where(
+          (m) =>
+              m.displayName.toLowerCase().contains(q) &&
+              m.displayName.toLowerCase() != q,
+        )
+        .take(6)
+        .toList();
+  }
+
+  void _applySuggestion(
+    _SplitRowData row,
+    ItemMemoryData suggestion,
+    List<PocketWithBalance> walletPockets,
+  ) {
+    AppHaptics.selection(ref.read(settingsProvider).hapticsEnabled);
+    setState(() {
+      row.nameCtrl.text = suggestion.displayName;
+      row.nameCtrl.selection = TextSelection.collapsed(
+        offset: suggestion.displayName.length,
+      );
+      if (row.amountCtrl.text.trim().isEmpty && suggestion.lastAmount > 0) {
+        row.amountCtrl.text = CurrencyFormatter.format(
+          suggestion.lastAmount,
+          withSymbol: false,
+        );
+      }
+      if (suggestion.lastCategoryId != null) {
+        row.categoryId = suggestion.lastCategoryId;
+      }
+      if (suggestion.lastPocketId != null &&
+          walletPockets.any((p) => p.pocket.id == suggestion.lastPocketId)) {
+        row.pocketId = suggestion.lastPocketId;
+      }
+    });
   }
 
   @override
@@ -224,14 +292,14 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
 
   void _addRow() {
     final last = _rows.isNotEmpty ? _rows.last : null;
+    final row = _SplitRowData(
+      categoryId: last?.categoryId,
+      pocketId: last?.pocketId,
+      note: last?.noteCtrl.text ?? '',
+    );
+    _attachFocusListener(row);
     setState(() {
-      _rows.add(
-        _SplitRowData(
-          categoryId: last?.categoryId,
-          pocketId: last?.pocketId,
-          note: last?.noteCtrl.text ?? '',
-        ),
-      );
+      _rows.add(row);
     });
   }
 
@@ -285,7 +353,7 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
     if (validComponents.length < 2) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Isi minimal 2 komponen dengan nominal lebih dari 0'),
+          content: Text('Isi minimal 2 item dengan nominal lebih dari 0'),
         ),
       );
       return;
@@ -297,7 +365,7 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
         builder: (ctx) => AlertDialog(
           title: const Text('Total Pecahan Berbeda'),
           content: Text(
-            'Total komponen (${CurrencyFormatter.format(_allocatedSum)}) berbeda dengan nominal awal (${CurrencyFormatter.format(_targetTotal)}). Tetap simpan dengan total baru?',
+            'Total item (${CurrencyFormatter.format(_allocatedSum)}) berbeda dengan nominal awal (${CurrencyFormatter.format(_targetTotal)}). Tetap simpan dengan total baru?',
           ),
           actions: [
             TextButton(
@@ -484,7 +552,7 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
                     ),
                   ),
 
-                // Daftar Komponen Pecahan
+                // Daftar Item Pecahan
                 Expanded(
                   child: ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
@@ -496,12 +564,18 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
                           child: OutlinedButton.icon(
                             onPressed: _addRow,
                             icon: const Icon(Icons.add_rounded),
-                            label: const Text('Tambah Komponen Item'),
+                            label: const Text('Tambah Item'),
                           ),
                         );
                       }
 
                       final row = _rows[idx];
+                      final suggestions = _suggestionsForRow(row);
+                      final showSuggestions =
+                          suggestions.isNotEmpty &&
+                          (_focusedRowIndex == idx ||
+                              row.nameCtrl.text.trim().isEmpty);
+
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 10),
                         child: Card(
@@ -515,14 +589,14 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
                                       MainAxisAlignment.spaceBetween,
                                   children: [
                                     Text(
-                                      'Komponen #${idx + 1}',
+                                      'Item #${idx + 1}',
                                       style: tt.labelLarge?.copyWith(
                                         color: cs.primary,
                                       ),
                                     ),
                                     if (_rows.length > 2)
                                       IconButton(
-                                        tooltip: 'Hapus komponen',
+                                        tooltip: 'Hapus item',
                                         visualDensity: VisualDensity.compact,
                                         icon: const Icon(
                                           Icons.close_rounded,
@@ -532,6 +606,9 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
                                           setState(() {
                                             final removed = _rows.removeAt(idx);
                                             removed.dispose();
+                                            if (_focusedRowIndex == idx) {
+                                              _focusedRowIndex = null;
+                                            }
                                           });
                                         },
                                       ),
@@ -540,8 +617,10 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
                                 const SizedBox(height: 6),
                                 TextField(
                                   controller: row.nameCtrl,
+                                  focusNode: row.nameFocus,
                                   textCapitalization:
                                       TextCapitalization.sentences,
+                                  onChanged: (_) => setState(() {}),
                                   decoration: InputDecoration(
                                     labelText: 'Nama item / produk',
                                     hintText: idx == 0
@@ -550,6 +629,35 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
                                     isDense: true,
                                   ),
                                 ),
+                                if (showSuggestions) ...[
+                                  const SizedBox(height: 8),
+                                  SizedBox(
+                                    height: 36,
+                                    child: ListView.separated(
+                                      scrollDirection: Axis.horizontal,
+                                      itemCount: suggestions.length,
+                                      separatorBuilder: (_, _) =>
+                                          const SizedBox(width: 6),
+                                      itemBuilder: (_, sIdx) {
+                                        final item = suggestions[sIdx];
+                                        return ActionChip(
+                                          visualDensity: VisualDensity.compact,
+                                          label: Text(
+                                            item.lastAmount > 0
+                                                ? '${item.displayName} • ${CurrencyFormatter.formatCompact(item.lastAmount)}'
+                                                : item.displayName,
+                                            style: tt.labelSmall,
+                                          ),
+                                          onPressed: () => _applySuggestion(
+                                            row,
+                                            item,
+                                            walletPockets,
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
                                 const SizedBox(height: 10),
                                 Row(
                                   children: [

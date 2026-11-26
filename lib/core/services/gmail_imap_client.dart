@@ -212,7 +212,7 @@ class GmailImapClient {
     required int lookbackDays,
     required Set<String> alreadyImportedUids,
     int? ignoreOnOrBeforeDayKey,
-    int maxScanHeaders = 80,
+    int maxScanHeaders = 200,
   }) async {
     try {
       await _connect();
@@ -290,7 +290,7 @@ class GmailImapClient {
       final results = <GmailRawMessage>[];
       for (final item in candidates) {
         final bodyLines = await _sendCommand(
-          'UID FETCH ${item.uid} (BODY.PEEK[TEXT]<0.32768>)',
+          'UID FETCH ${item.uid} (BODY.PEEK[TEXT]<0.131072>)',
         );
         final body = _extractLiteralBody(bodyLines);
         results.add(

@@ -37,9 +37,17 @@ class QrisEmailParser {
     'Permata': ['permata'],
     'Jenius': ['jenius', 'btpn'],
     'LinkAja': ['linkaja'],
+    'Allo Bank': ['allobank', 'allo bank'],
+    'Neo Bank': ['neobank', 'bankneo'],
+    'OCBC': ['ocbc'],
+    'Danamon': ['danamon'],
+    'Maybank': ['maybank'],
+    'Digibank': ['digibank', 'dbs'],
+    'Superbank': ['superbank'],
+    'Krom': ['krom'],
   };
 
-  static const List<String> _rejectKeywords = [
+  static const List<String> _subjectRejectKeywords = [
     'kode otp',
     'otp anda',
     'verification code',
@@ -56,8 +64,27 @@ class QrisEmailParser {
     'newsletter',
   ];
 
-  static final RegExp _failedWordRegex = RegExp(
+  static const List<String> _bodyHardRejectKeywords = [
+    'kode otp',
+    'otp anda',
+    'verification code',
+    'kode verifikasi',
+    'login dari perangkat',
+    'reset password',
+  ];
+
+  static final RegExp _failedSubjectRegex = RegExp(
     r'\b(gagal|failed|ditolak|dibatalkan|declined|expired)\b',
+    caseSensitive: false,
+  );
+
+  static final RegExp _failedBodyPhraseRegex = RegExp(
+    r'(?:status\s*[:\-]?\s*(?:gagal|failed|ditolak|dibatalkan|declined)|(?:transaksi|pembayaran|qris)\s+(?:gagal|ditolak|dibatalkan)|payment\s+(?:failed|declined))',
+    caseSensitive: false,
+  );
+
+  static final RegExp _successBodyPhraseRegex = RegExp(
+    r'(?:status\s*[:\-]?\s*(?:berhasil|sukses|success|settled)|(?:transaksi|pembayaran|qris)\s+(?:berhasil|sukses)|payment\s+successful)',
     caseSensitive: false,
   );
 
@@ -67,20 +94,36 @@ class QrisEmailParser {
     'pembayaran qr',
     'bayar qr',
     'scan qr',
+    'qr code',
     'transaksi berhasil',
+    'transaksi sukses',
     'pembayaran berhasil',
+    'pembayaran sukses',
     'bukti transaksi',
     'notifikasi transaksi',
+    'resi transaksi',
+    'detail transaksi',
+    'konfirmasi pembayaran',
+    'konfirmasi transaksi',
+    'e-receipt',
     'payment successful',
     'payment receipt',
+    'payment confirmation',
+    'receipt',
+    'pembayaran',
+    'transaksi',
+    'pembelian',
+    'merchant',
   ];
 
   /// Filter cepat berdasarkan header FROM + SUBJECT agar hanya mengunduh body email relevan.
   static bool isLikelyQrisHeader(String from, String subject) {
-    final combined = '${from.toLowerCase()} ${subject.toLowerCase()}';
-    for (final reject in _rejectKeywords) {
-      if (combined.contains(reject)) return false;
+    final lowerSubj = subject.toLowerCase();
+    final combined = '${from.toLowerCase()} $lowerSubj';
+    for (final reject in _subjectRejectKeywords) {
+      if (lowerSubj.contains(reject)) return false;
     }
+    if (_failedSubjectRegex.hasMatch(subject)) return false;
 
     final hasBank = detectBankName(from, subject, '') != 'QRIS';
     final hasQrisWord = _qrisPositiveKeywords.any(combined.contains);
@@ -113,29 +156,43 @@ class QrisEmailParser {
     required String rawBody,
     DateTime? emailDate,
   }) {
-    final cleanText = normalizeEmailBody(rawBody);
-    final lowerAll = '${subject.toLowerCase()}\n${cleanText.toLowerCase()}';
-
-    for (final reject in _rejectKeywords) {
-      if (lowerAll.contains(reject)) return null;
+    final lowerSubj = subject.toLowerCase();
+    for (final reject in _subjectRejectKeywords) {
+      if (lowerSubj.contains(reject)) return null;
     }
-    if (_failedWordRegex.hasMatch(subject) ||
-        _failedWordRegex.hasMatch(cleanText)) {
+    if (_failedSubjectRegex.hasMatch(subject)) return null;
+
+    final cleanText = normalizeEmailBody(rawBody);
+    final lowerBody = cleanText.toLowerCase();
+    final lowerAll = '$lowerSubj\n$lowerBody';
+
+    for (final reject in _bodyHardRejectKeywords) {
+      if (lowerBody.contains(reject)) return null;
+    }
+    // Tolak email gagal di body hanya jika frasa status gagal muncul DAN tidak ada status berhasil
+    // (agar disclaimer footer bank seperti "Jika transaksi gagal hubungi CS..." tidak salah menolak).
+    if (_failedBodyPhraseRegex.hasMatch(cleanText) &&
+        !_successBodyPhraseRegex.hasMatch(cleanText)) {
       return null;
     }
 
-    // Wajib mengandung indikasi QRIS atau pembayaran ke merchant
+    // Wajib mengandung indikasi QRIS atau pembayaran QR ke merchant
     final hasQris =
         lowerAll.contains('qris') ||
         lowerAll.contains('pembayaran qr') ||
+        lowerAll.contains('bayar qr') ||
         lowerAll.contains('qr payment') ||
-        lowerAll.contains('scan qr');
+        lowerAll.contains('scan qr') ||
+        lowerAll.contains('qr code') ||
+        lowerAll.contains('pembayaran merchant') ||
+        lowerAll.contains('bayar merchant');
     if (!hasQris) return null;
 
     // Pastikan bukan email pemasukan/terima dana QRIS merchant
     if (lowerAll.contains('dana masuk') ||
         lowerAll.contains('anda menerima') ||
-        lowerAll.contains('uang masuk')) {
+        lowerAll.contains('uang masuk') ||
+        lowerAll.contains('dana diterima')) {
       return null;
     }
 
@@ -161,7 +218,7 @@ class QrisEmailParser {
   static int? extractAmount(String text) {
     final labeledPatterns = [
       RegExp(
-        r'(?:total\s*(?:pembayaran|transaksi|bayar|tagihan)?|nominal\s*(?:transaksi)?|jumlah\s*(?:pembayaran|transaksi)?|amount|nilai\s*transaksi)\s*[:\-]?\s*(?:rp\.?|idr)\s*([0-9][0-9.,]*)',
+        r'(?:total\s*(?:pembayaran|transaksi|bayar|tagihan|debet)?|nominal\s*(?:transaksi|bayar)?|jumlah\s*(?:pembayaran|transaksi|bayar)?|amount|nilai\s*transaksi)\s*[:\-]?\s*(?:rp\.?|idr)\s*([0-9][0-9.,]*)',
         caseSensitive: false,
       ),
       RegExp(r'(?:rp\.?|idr)\s*([0-9][0-9.,]*)', caseSensitive: false),
@@ -182,7 +239,7 @@ class QrisEmailParser {
   }
 
   static int? _parseRupiahNumber(String raw) {
-    var s = raw.trim();
+    var s = raw.trim().replaceAll(RegExp(r'[.,]-+$'), '');
     // Hapus desimal sen (,00 atau .00 di akhir)
     if (RegExp(r'[,.]\d{2}$').hasMatch(s)) {
       s = s.substring(0, s.length - 3);
@@ -196,7 +253,7 @@ class QrisEmailParser {
   static String? extractMerchant(String body, String subject) {
     final patterns = [
       RegExp(
-        r'(?:nama\s*merchant|merchant\s*name|merchant|dibayarkan\s*ke|bayar\s*ke|penerima|kepada|nama\s*toko|outlet|tujuan)\s*[:\-]\s*([^\n\r|]{2,60})',
+        r'(?:nama\s*merchant|merchant\s*name|merchant\s*/\s*toko|merchant|dibayarkan\s*ke|bayar\s*ke|paid\s*to|penerima|kepada|nama\s*toko|nama\s*gerai|gerai|outlet|tujuan)\s*[:\-]\s*([^\n\r|]{2,60})',
         caseSensitive: false,
       ),
       RegExp(
