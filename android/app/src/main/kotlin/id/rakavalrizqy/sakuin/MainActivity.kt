@@ -146,7 +146,7 @@ class MainActivity : FlutterFragmentActivity() {
                         try {
                             configureDailyUpdateWorker(enabled, token)
                             result.success(true)
-                        } catch (e: Exception) {
+                        } catch (e: Throwable) {
                             result.error("WORKER_ERROR", e.message, null)
                         }
                     }
@@ -322,26 +322,30 @@ class MainActivity : FlutterFragmentActivity() {
 
     private fun handleIncomingShareIntent(intent: Intent?, notifyFlutter: Boolean) {
         if (intent == null) return
-        if (intent.action == Intent.ACTION_SEND && intent.type?.startsWith("image/") == true) {
-            @Suppress("DEPRECATION")
-            val uri: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-            } else {
-                intent.getParcelableExtra(Intent.EXTRA_STREAM)
-            }
-            if (uri != null) {
-                val copied = copyUriToReceiptCache(uri, "shared")
-                if (copied != null) {
-                    val path = copied.absolutePath
-                    if (notifyFlutter && receiptChannel != null) {
-                        runOnUiThread {
-                            receiptChannel?.invokeMethod("onSharedImage", path)
+        try {
+            if (intent.action == Intent.ACTION_SEND && intent.type?.startsWith("image/") == true) {
+                @Suppress("DEPRECATION")
+                val uri: Uri? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+                } else {
+                    intent.getParcelableExtra(Intent.EXTRA_STREAM)
+                }
+                if (uri != null) {
+                    val copied = copyUriToReceiptCache(uri, "shared")
+                    if (copied != null) {
+                        val path = copied.absolutePath
+                        if (notifyFlutter && receiptChannel != null) {
+                            runOnUiThread {
+                                receiptChannel?.invokeMethod("onSharedImage", path)
+                            }
+                        } else {
+                            pendingSharedImagePath = path
                         }
-                    } else {
-                        pendingSharedImagePath = path
                     }
                 }
             }
+        } catch (_: Throwable) {
+            // Jangan pernah crash saat memproses intent dari aplikasi lain
         }
     }
 
@@ -421,7 +425,7 @@ class MainActivity : FlutterFragmentActivity() {
                     recognizer.close()
                     result.error("OCR_ERROR", e.message ?: "Gagal membaca teks dari gambar", null)
                 }
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             result.error("OCR_ERROR", e.message, null)
         }
     }

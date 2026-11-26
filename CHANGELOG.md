@@ -1,5 +1,9 @@
 # Catatan Rilis Sakuin
 
+## v1.5.1
+### Perbaikan Kritis
+- **Perbaikan Force Close Saat Membuka Aplikasi (`v1.5.0`):** Menambahkan aturan ProGuard/R8 Full Mode lengkap untuk `WorkManager`, `AndroidX Startup`, `RoomDatabase`, `Google ML Kit`, dan `Firebase ComponentRegistrar` yang sebelumnya terpotong oleh R8 saat build release, serta menambahkan pelindung `Throwable` pada handler native Android.
+
 ## v1.5.0
 ### Apa yang Baru
 - **Scan Struk Hybrid (Kamera, Galeri, & Share Gambar ke Sakuin):** Foto struk langsung dengan kamera, pilih dari galeri, atau langsung klik **Bagikan (Share)** dari Galeri/WhatsApp ke Sakuin! Default berjalan **100% offline dengan Google ML Kit** (dengan rekonstruksi baris otomatis), plus dukungan opsional **Gemini AI Vision** di Pengaturan dengan *fallback* otomatis ke offline jika sedang tidak ada sinyal.
