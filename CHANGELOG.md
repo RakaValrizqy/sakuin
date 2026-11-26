@@ -1,5 +1,9 @@
 # Catatan Rilis Sakuin
 
+## v1.6.0
+### Apa yang Baru
+- **Bagi Pemasukan Otomatis ke Pos Budget berdasarkan Persentase (%):** Setiap kali kamu mencatat **Pemasukan** pada saku yang memiliki pos budget, langsung tersedia opsi **Bagi per Persentase (%)** untuk membagikan dana masuk ke setiap pos budget dengan slider, input angka %, tombol cepat (`10%`, `20%`, `30%`, `50%`, `Isi sisa`, `Bagi rata`), serta kategori otomatis **Belum Dialokasikan (Saldo Bebas)** untuk menampung sisa persentase yang belum ditentukan. Template persentase juga otomatis diingat untuk pemasukan berikutnya di saku tersebut!
+
 ## v1.5.4
 ### Apa yang Baru
 - **Split Bill Langsung dari Antrean QRIS (Gmail):** Setiap transaksi di antrean review Auto QRIS kini memiliki tombol **Split Bill** — bisa langsung dibagi ke beberapa orang (sama rata atau dipecah per item dengan saran nama otomatis & tombol *Isi sisa* yang mencocokkan total QRIS), lalu disimpan ke **Transaksi + Piutang/Hutang**, **Transaksi Biasa**, atau **Tidak Disimpan (Hanya Cek)**.

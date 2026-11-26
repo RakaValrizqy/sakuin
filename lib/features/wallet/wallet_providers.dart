@@ -213,6 +213,27 @@ class WalletActions {
     );
   }
 
+  /// Alokasikan dana pemasukan dari Saldo Bebas (Belum Dialokasikan) ke beberapa pos budget
+  /// secara atomik dalam satu transaksi database.
+  Future<void> allocateIncomeToPockets({
+    required int walletId,
+    required Map<int, int> amountByPocketId,
+    String note = 'Bagi otomatis dari pemasukan',
+  }) async {
+    await _db.transaction(() async {
+      for (final entry in amountByPocketId.entries) {
+        if (entry.value <= 0) continue;
+        await _db.allocateOrMovePocket(
+          walletId: walletId,
+          fromPocketId: null,
+          toPocketId: entry.key,
+          amount: entry.value,
+          note: note,
+        );
+      }
+    });
+  }
+
   /// Simpan alokasi beberapa pos budget dalam satu saku sekaligus secara atomik.
   Future<void> saveBulkPocketAllocations({
     required int walletId,

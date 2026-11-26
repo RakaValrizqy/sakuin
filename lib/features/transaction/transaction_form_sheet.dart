@@ -13,6 +13,7 @@ import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
 import 'package:sakuin/features/transaction/widgets/custom_keypad.dart';
+import 'package:sakuin/features/wallet/income_allocation_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_form_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_providers.dart';
 
@@ -76,6 +77,10 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
   bool _showNoteField = false;
   bool _showKeypad = true;
   bool _saving = false;
+
+  /// Khusus pemasukan baru di saku yang punya pos budget: langsung buka opsi bagi persentase (%)
+  /// setelah simpan, kecuali pengguna memilih 1 pos tertentu atau memilih Belum Dialokasikan.
+  bool _splitIncomeByPercent = true;
 
   List<Category> _orderedCategories = [];
   List<ItemMemoryData> _suggestions = [];
@@ -372,6 +377,40 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
         );
 
     AppHaptics.medium(ref.read(settingsProvider).hapticsEnabled);
+
+    // Jika pemasukan baru di saku yang memiliki pos budget dan mode Bagi Persentase aktif,
+    // langsung tampilkan sheet pembagian persentase ke tiap pos + kategori Belum Dialokasikan.
+    if (mounted &&
+        _type == 'income' &&
+        widget.existing == null &&
+        _pocketId == null &&
+        _splitIncomeByPercent) {
+      final walletPockets =
+          ref
+              .read(allActivePocketsProvider)
+              .valueOrNull
+              ?.where((p) => p.pocket.walletId == _walletId)
+              .toList() ??
+          const [];
+      if (walletPockets.isNotEmpty) {
+        final walletName =
+            wallets
+                .where((w) => w.wallet.id == _walletId)
+                .firstOrNull
+                ?.wallet
+                .name ??
+            'Saku';
+        await showIncomePercentageAllocationSheet(
+          context,
+          walletId: _walletId!,
+          walletName: walletName,
+          incomeAmount: amount,
+          pockets: walletPockets,
+          incomeTitle: _itemCtrl.text.trim(),
+        );
+      }
+    }
+
     if (mounted) Navigator.of(context).pop(true);
   }
 
@@ -755,18 +794,52 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                   ),
                   if (walletPockets.isNotEmpty) ...[
                     const SizedBox(height: 12),
-                    Text('Pos Budget Saku (opsional)', style: tt.labelMedium),
+                    Text(
+                      _type == 'income' && !isEdit
+                          ? 'Alokasi Pos Budget Saku'
+                          : 'Pos Budget Saku (opsional)',
+                      style: tt.labelMedium,
+                    ),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
+                        if (_type == 'income' && !isEdit)
+                          ChoiceChip(
+                            avatar: Icon(
+                              Icons.pie_chart_rounded,
+                              size: 16,
+                              color: cs.primary,
+                            ),
+                            label: const Text('Bagi per Persentase (%)'),
+                            selected:
+                                _pocketId == null && _splitIncomeByPercent,
+                            onSelected: (_) {
+                              AppHaptics.selection(haptics);
+                              setState(() {
+                                _pocketId = null;
+                                _splitIncomeByPercent = true;
+                              });
+                            },
+                          ),
                         ChoiceChip(
-                          label: const Text('Saldo Bebas'),
-                          selected: _pocketId == null,
+                          label: Text(
+                            _type == 'income' && !isEdit
+                                ? 'Belum Dialokasikan'
+                                : 'Saldo Bebas',
+                          ),
+                          selected:
+                              _pocketId == null &&
+                              !(_type == 'income' &&
+                                  !isEdit &&
+                                  _splitIncomeByPercent),
                           onSelected: (_) {
                             AppHaptics.selection(haptics);
-                            setState(() => _pocketId = null);
+                            setState(() {
+                              _pocketId = null;
+                              _splitIncomeByPercent = false;
+                            });
                           },
                         ),
                         for (final p in walletPockets)
@@ -782,7 +855,10 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                             selected: _pocketId == p.pocket.id,
                             onSelected: (_) {
                               AppHaptics.selection(haptics);
-                              setState(() => _pocketId = p.pocket.id);
+                              setState(() {
+                                _pocketId = p.pocket.id;
+                                _splitIncomeByPercent = false;
+                              });
                             },
                           ),
                       ],
