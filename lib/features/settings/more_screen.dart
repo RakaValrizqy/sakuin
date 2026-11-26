@@ -67,9 +67,9 @@ class MoreScreen extends ConsumerWidget {
                 const Divider(height: 1),
                 ListTile(
                   leading: const Icon(Icons.qr_code_2_rounded),
-                  title: const Text('Auto QRIS (Gmail)'),
+                  title: const Text('Auto Catat (Gmail & Notifikasi)'),
                   subtitle: const Text(
-                    'Tarik pengeluaran QRIS dari email Gmail & pecah item',
+                    'Tarik transaksi QRIS dari email Gmail & notifikasi bank/e-wallet',
                   ),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,

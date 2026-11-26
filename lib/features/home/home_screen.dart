@@ -11,6 +11,7 @@ import 'package:sakuin/core/utils/haptics.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/features/debt/debt_list_screen.dart';
 import 'package:sakuin/features/debt/debt_providers.dart';
+import 'package:sakuin/features/home/safe_to_spend_card.dart';
 import 'package:sakuin/features/qris/qris_inbox_screen.dart';
 import 'package:sakuin/features/receipt/receipt_scanner_screen.dart';
 import 'package:sakuin/features/recurring/recurring_service.dart';
@@ -167,7 +168,11 @@ class HomeScreen extends ConsumerWidget {
             hideBalances: hideBalances,
             periodLabel: period.label,
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
+
+          // 1a. Batas Aman Belanja Harian (Safe-to-Spend)
+          const SafeToSpendCard(),
+          const SizedBox(height: 12),
 
           // 1b. Antrean Email QRIS dari Gmail Menunggu Review
           if (pendingQris.isNotEmpty) ...[

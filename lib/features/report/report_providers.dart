@@ -3,6 +3,7 @@ import 'package:sakuin/core/db/app_database.dart';
 import 'package:sakuin/core/db/db_provider.dart';
 import 'package:sakuin/core/services/settings_service.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
+import 'package:sakuin/core/utils/spending_insights_calculator.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
 
 class ReportPeriodSelection {
@@ -105,5 +106,52 @@ final reportDataProvider = FutureProvider<ReportData>((ref) async {
     previousSummary: prevSummary,
     categories: categories,
     trend: trend,
+  );
+});
+
+final periodInsightsProvider = FutureProvider<PeriodInsights>((ref) async {
+  final db = ref.watch(appDatabaseProvider);
+  final startDay = ref.watch(settingsProvider.select((s) => s.periodStartDay));
+  final sel = ref.watch(reportPeriodSelectionProvider);
+  final period = ref.watch(activeReportPeriodProvider);
+  ref.watch(transactionRevisionProvider);
+
+  final isMonthly =
+      sel.preset == ReportPeriodPreset.thisPeriod ||
+      sel.preset == ReportPeriodPreset.lastPeriod;
+  final prevPeriod = AppDateUtils.previousPeriod(
+    period,
+    startDay,
+    isMonthlyCycle: isMonthly,
+  );
+
+  final trend = await db.getDailyTrend(
+    startDayKey: period.startDayKey,
+    endDayKey: period.endDayKey,
+  );
+  final currentExpenseCats = await db.getCategoryBreakdown(
+    startDayKey: period.startDayKey,
+    endDayKey: period.endDayKey,
+    type: 'expense',
+  );
+  final prevExpenseCats = await db.getCategoryBreakdown(
+    startDayKey: prevPeriod.startDayKey,
+    endDayKey: prevPeriod.endDayKey,
+    type: 'expense',
+  );
+  final currentTxs = await db.fetchTransactionsPage(
+    limit: 500,
+    startDayKey: period.startDayKey,
+    endDayKey: period.endDayKey,
+    type: 'expense',
+  );
+
+  return SpendingInsightsCalculator.computePeriodInsights(
+    now: DateTime.now(),
+    period: period,
+    trend: trend,
+    currentTransactions: currentTxs,
+    currentExpenseCategories: currentExpenseCats,
+    previousExpenseCategories: prevExpenseCats,
   );
 });

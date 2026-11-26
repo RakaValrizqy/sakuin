@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sakuin/core/services/notification_capture_service.dart';
 import 'package:sakuin/core/services/notification_service.dart';
 import 'package:sakuin/core/services/qris_sync_service.dart';
 import 'package:sakuin/core/services/receipt_scanner_service.dart';
@@ -25,7 +26,8 @@ class NavigationShell extends ConsumerStatefulWidget {
   ConsumerState<NavigationShell> createState() => _NavigationShellState();
 }
 
-class _NavigationShellState extends ConsumerState<NavigationShell> {
+class _NavigationShellState extends ConsumerState<NavigationShell>
+    with WidgetsBindingObserver {
   int _tabIndex = 0;
   bool _postFrameInitialized = false;
   StreamSubscription<String>? _sharedImageSub;
@@ -33,6 +35,7 @@ class _NavigationShellState extends ConsumerState<NavigationShell> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     // Cold start <= 1 detik: jalankan inisialisasi notifikasi, FLAG_SECURE, recurring,
     // QRIS Gmail sync, Share Intent gambar struk, dan cek update secara lazy setelah frame pertama.
     WidgetsBinding.instance.addPostFrameCallback((_) => _runPostFirstFrame());
@@ -40,8 +43,18 @@ class _NavigationShellState extends ConsumerState<NavigationShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _sharedImageSub?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      ref
+          .read(notificationCaptureServiceProvider)
+          .importCapturedNotifications();
+    }
   }
 
   void _openSharedReceiptImage(String path) {
@@ -82,6 +95,9 @@ class _NavigationShellState extends ConsumerState<NavigationShell> {
     if (qrisCfg.isConfigured && qrisCfg.autoSyncOnOpen) {
       qrisSvc.syncNow();
     }
+    await ref
+        .read(notificationCaptureServiceProvider)
+        .importCapturedNotifications();
 
     if (settings.autoCheckUpdate) {
       final result = await updater.checkForUpdate();

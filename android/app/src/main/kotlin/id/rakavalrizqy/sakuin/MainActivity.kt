@@ -35,6 +35,7 @@ class MainActivity : FlutterFragmentActivity() {
         private const val SECURITY_CHANNEL = "id.rakavalrizqy.sakuin/security"
         private const val UPDATER_CHANNEL = "id.rakavalrizqy.sakuin/updater"
         private const val RECEIPT_CHANNEL = "id.rakavalrizqy.sakuin/receipt"
+        private const val NOTIF_CAPTURE_CHANNEL = "id.rakavalrizqy.sakuin/notif_capture"
         private const val REQ_CAPTURE_PHOTO = 7101
         private const val REQ_PICK_IMAGE = 7102
     }
@@ -192,6 +193,61 @@ class MainActivity : FlutterFragmentActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, NOTIF_CAPTURE_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "isNotificationListenerEnabled" -> {
+                        try {
+                            val enabledListeners = Settings.Secure.getString(
+                                contentResolver,
+                                "enabled_notification_listeners",
+                            ) ?: ""
+                            result.success(enabledListeners.contains("$packageName/"))
+                        } catch (_: Throwable) {
+                            result.success(false)
+                        }
+                    }
+                    "openNotificationListenerSettings" -> {
+                        try {
+                            val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Throwable) {
+                            result.error("SETTINGS_ERROR", e.message, null)
+                        }
+                    }
+                    "setNotificationCaptureEnabled" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        try {
+                            val prefs = getSharedPreferences(
+                                SakuinNotificationListener.PREFS_NAME,
+                                MODE_PRIVATE,
+                            )
+                            prefs.edit().putBoolean(
+                                SakuinNotificationListener.KEY_ENABLED,
+                                enabled,
+                            ).apply()
+                            result.success(true)
+                        } catch (e: Throwable) {
+                            result.error("PREFS_ERROR", e.message, null)
+                        }
+                    }
+                    "consumeCapturedNotifications" -> {
+                        try {
+                            val items = SakuinNotificationListener.consumeQueuedNotifications(
+                                applicationContext,
+                            )
+                            result.success(items)
+                        } catch (_: Throwable) {
+                            result.success(emptyList<Map<String, Any>>())
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
+            }
     }
 
     private fun configureDailyUpdateWorker(enabled: Boolean, githubToken: String?) {

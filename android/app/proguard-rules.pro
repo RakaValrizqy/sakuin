@@ -25,6 +25,7 @@
 
 # AndroidX Startup, WorkManager, & Room (wajib di R8 Full Mode agar tidak force close saat cold start)
 -keep class id.rakavalrizqy.sakuin.UpdateCheckWorker { *; }
+-keep class id.rakavalrizqy.sakuin.SakuinNotificationListener { *; }
 -keep class androidx.startup.** { *; }
 -keep class * implements androidx.startup.Initializer { *; }
 -keep class androidx.work.** { *; }

@@ -863,6 +863,32 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                           ),
                       ],
                     ),
+                    if (_type == 'income' && isEdit && _parsedAmount > 0) ...[
+                      const SizedBox(height: 10),
+                      OutlinedButton.icon(
+                        onPressed: () async {
+                          final walletName =
+                              wallets
+                                  .where((w) => w.wallet.id == _walletId)
+                                  .firstOrNull
+                                  ?.wallet
+                                  .name ??
+                              'Saku';
+                          await showIncomePercentageAllocationSheet(
+                            context,
+                            walletId: _walletId!,
+                            walletName: walletName,
+                            incomeAmount: _parsedAmount,
+                            pockets: walletPockets,
+                            incomeTitle: _itemCtrl.text.trim(),
+                          );
+                        },
+                        icon: const Icon(Icons.pie_chart_rounded, size: 18),
+                        label: const Text(
+                          'Bagi Pemasukan Ini per Persentase (%)',
+                        ),
+                      ),
+                    ],
                   ],
                 ] else ...[
                   Text('Dari Dompet', style: tt.labelMedium),

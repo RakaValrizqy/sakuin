@@ -1,5 +1,12 @@
 # Catatan Rilis Sakuin
 
+## v1.7.0
+### Apa yang Baru
+- **Batas Aman Belanja Harian (*Safe-to-Spend*) di Beranda:** Menampilkan jatah belanja aman per hari (plus progres pemakaian hari ini) yang dihitung dari sisa anggaran bulanan, pos budget pilihan, atau total saldo dibagi sisa hari periode berjalan. Ketuk kartunya untuk mengganti sumber dana kapan saja.
+- **Auto-Catat dari Notifikasi HP (Opsional, 100% Lokal):** Menangkap notifikasi transaksi dari aplikasi bank & e-wallet Indonesia (Mandiri Livin', BCA, BRImo, BNI, BSI, GoPay, OVO, DANA, ShopeePay, SeaBank, Jago, Blu, dll.) langsung ke antrean Review — siap **Simpan**, **Pecah Item**, atau **Split Bill** tanpa perlu menunggu email.
+- **Kalender Pengeluaran (*Spending Heatmap*) & Insight Periode di Laporan:** Kalender bulanan interaktif berwarna (*No-Spend Day* hingga hari boros — ketuk tanggal untuk melihat transaksi hari itu) plus kartu **Insight Periode** (jumlah *No-Spend Day*, proyeksi akhir periode, hari paling boros, item tersering, dan kategori paling naik/turun dibanding periode lalu).
+- **Bagi Saldo Bebas (%) di Detail Saku & Edit Pemasukan:** Fitur pembagian persentase (%) kini juga bisa dipakai kapan saja dari Detail Saku (untuk membagi Saldo Bebas yang sudah ada) maupun dari layar Edit Transaksi Pemasukan.
+
 ## v1.6.0
 ### Apa yang Baru
 - **Bagi Pemasukan Otomatis ke Pos Budget berdasarkan Persentase (%):** Setiap kali kamu mencatat **Pemasukan** pada saku yang memiliki pos budget, langsung tersedia opsi **Bagi per Persentase (%)** untuk membagikan dana masuk ke setiap pos budget dengan slider, input angka %, tombol cepat (`10%`, `20%`, `30%`, `50%`, `Isi sisa`, `Bagi rata`), serta kategori otomatis **Belum Dialokasikan (Saldo Bebas)** untuk menampung sisa persentase yang belum ditentukan. Template persentase juga otomatis diingat untuk pemasukan berikutnya di saku tersebut!

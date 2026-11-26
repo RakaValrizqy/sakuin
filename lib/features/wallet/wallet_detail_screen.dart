@@ -10,6 +10,7 @@ import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
+import 'package:sakuin/features/wallet/income_allocation_sheet.dart';
 import 'package:sakuin/features/wallet/pocket_sheets.dart';
 import 'package:sakuin/features/wallet/transfer_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_form_sheet.dart';
@@ -282,6 +283,29 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
                   ),
                 ],
               ),
+              if (unallocated > 0) ...[
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton.tonalIcon(
+                    onPressed: () async {
+                      final ok = await showIncomePercentageAllocationSheet(
+                        context,
+                        walletId: wb.wallet.id,
+                        walletName: wb.wallet.name,
+                        incomeAmount: unallocated,
+                        pockets: pockets,
+                        incomeTitle: 'Saldo Bebas',
+                      );
+                      if (ok == true) _loadData();
+                    },
+                    icon: const Icon(Icons.pie_chart_rounded, size: 18),
+                    label: Text(
+                      'Bagi Saldo Bebas (${CurrencyFormatter.format(unallocated)}) per %',
+                    ),
+                  ),
+                ),
+              ],
             ],
             const SizedBox(height: 8),
 

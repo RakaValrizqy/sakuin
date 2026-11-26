@@ -64,6 +64,17 @@
             </intent-filter>
         </receiver>
 
+        <!-- Listener notifikasi lokal (opsional) untuk auto-catat transaksi QRIS/bank dari notifikasi HP -->
+        <service
+            android:name=".SakuinNotificationListener"
+            android:label="Sakuin Auto-Catat Notifikasi"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />

@@ -5,6 +5,7 @@ import 'package:sakuin/core/db/app_database.dart';
 import 'package:sakuin/core/db/db_provider.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
+import 'package:sakuin/core/utils/spending_insights_calculator.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
 import 'package:sakuin/features/budget/budget_providers.dart';
@@ -12,6 +13,7 @@ import 'package:sakuin/features/budget/budget_screen.dart';
 import 'package:sakuin/features/report/export_service.dart';
 import 'package:sakuin/features/report/report_providers.dart';
 import 'package:sakuin/features/report/widgets/donut_chart.dart';
+import 'package:sakuin/features/report/widgets/spending_heatmap_card.dart';
 import 'package:sakuin/features/report/widgets/trend_chart.dart';
 import 'package:sakuin/features/transaction/widgets/transaction_tile.dart';
 
@@ -150,6 +152,7 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
     final selection = ref.watch(reportPeriodSelectionProvider);
     final reportType = ref.watch(reportTypeProvider);
     final reportAsync = ref.watch(reportDataProvider);
+    final insightsAsync = ref.watch(periodInsightsProvider);
     final budgetsAsync = ref.watch(budgetProgressListProvider);
 
     final tt = Theme.of(context).textTheme;
@@ -487,6 +490,16 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                   ),
                   const SizedBox(height: 16),
 
+                  // Insight & Perbandingan Periode Otomatis
+                  if (insightsAsync.valueOrNull != null) ...[
+                    _PeriodInsightsCard(insights: insightsAsync.valueOrNull!),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Kalender Pengeluaran Interaktif (Spending Heatmap)
+                  const SpendingHeatmapCard(),
+                  const SizedBox(height: 16),
+
                   // Ringkasan Anggaran
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -539,6 +552,178 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                 ],
               );
             },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PeriodInsightsCard extends StatelessWidget {
+  const _PeriodInsightsCard({required this.insights});
+
+  final PeriodInsights insights;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.auto_graph_rounded, size: 20, color: cs.primary),
+                const SizedBox(width: 8),
+                Text('Insight Periode', style: tt.titleMedium),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: _InsightStatBox(
+                    icon: Icons.eco_outlined,
+                    iconColor: AppColors.income(context),
+                    label: 'No-Spend Day',
+                    value: '${insights.noSpendDays} hari',
+                    sub: 'dari ${insights.elapsedDays} hari berjalan',
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _InsightStatBox(
+                    icon: Icons.trending_up_rounded,
+                    iconColor: cs.primary,
+                    label: 'Proyeksi Akhir Periode',
+                    value: CurrencyFormatter.formatCompact(
+                      insights.projectedExpense,
+                    ),
+                    sub: 'estimasi ${insights.totalDays} hari',
+                  ),
+                ),
+              ],
+            ),
+            if (insights.busiestWeekdayName != null ||
+                insights.topItemName != null ||
+                insights.topRisingCategory != null ||
+                insights.topFallingCategory != null) ...[
+              const Divider(height: 22),
+              if (insights.busiestWeekdayName != null)
+                _InsightBullet(
+                  icon: Icons.calendar_view_week_outlined,
+                  text:
+                      'Hari paling boros: ${insights.busiestWeekdayName} (rata-rata ${CurrencyFormatter.format(insights.busiestWeekdayAverage)}/hari)',
+                ),
+              if (insights.topItemName != null)
+                _InsightBullet(
+                  icon: Icons.repeat_rounded,
+                  text:
+                      'Item tersering: ${insights.topItemName} (${insights.topItemCount}x • total ${CurrencyFormatter.format(insights.topItemTotal)})',
+                ),
+              if (insights.topRisingCategory != null)
+                _InsightBullet(
+                  icon: Icons.arrow_upward_rounded,
+                  iconColor: AppColors.expense(context),
+                  text:
+                      'Paling naik vs periode lalu: ${insights.topRisingCategory!.categoryName} (+${CurrencyFormatter.format(insights.topRisingCategory!.deltaAmount)}${insights.topRisingCategory!.deltaPercent != null ? ' / +${insights.topRisingCategory!.deltaPercent!.round()}%' : ''})',
+                ),
+              if (insights.topFallingCategory != null)
+                _InsightBullet(
+                  icon: Icons.arrow_downward_rounded,
+                  iconColor: AppColors.income(context),
+                  text:
+                      'Paling hemat vs periode lalu: ${insights.topFallingCategory!.categoryName} (-${CurrencyFormatter.format(insights.topFallingCategory!.deltaAmount.abs())}${insights.topFallingCategory!.deltaPercent != null ? ' / ${insights.topFallingCategory!.deltaPercent!.round()}%' : ''})',
+                ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _InsightStatBox extends StatelessWidget {
+  const _InsightStatBox({
+    required this.icon,
+    required this.iconColor,
+    required this.label,
+    required this.value,
+    required this.sub,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String label;
+  final String value;
+  final String sub;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: iconColor),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            value,
+            style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          Text(sub, style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant)),
+        ],
+      ),
+    );
+  }
+}
+
+class _InsightBullet extends StatelessWidget {
+  const _InsightBullet({
+    required this.icon,
+    required this.text,
+    this.iconColor,
+  });
+
+  final IconData icon;
+  final String text;
+  final Color? iconColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 17, color: iconColor ?? cs.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(text, style: Theme.of(context).textTheme.bodySmall),
           ),
         ],
       ),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sakuin/core/db/app_database.dart';
+import 'package:sakuin/core/services/notification_capture_service.dart';
 import 'package:sakuin/core/services/qris_sync_service.dart';
 import 'package:sakuin/core/services/settings_service.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
@@ -39,6 +40,12 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
   void initState() {
     super.initState();
     _loadConfig();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref
+          .read(notificationCaptureServiceProvider)
+          .importCapturedNotifications();
+      ref.invalidate(notificationCaptureStatusProvider);
+    });
   }
 
   @override
@@ -279,9 +286,17 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
   }
 
   Future<void> _syncNow() async {
-    if (_syncing || !_connected) return;
+    if (_syncing) return;
     setState(() => _syncing = true);
-    final res = await ref.read(qrisSyncServiceProvider).syncNow();
+    final notifAdded = await ref
+        .read(notificationCaptureServiceProvider)
+        .importCapturedNotifications();
+    ref.invalidate(notificationCaptureStatusProvider);
+
+    QrisSyncResult res = const QrisSyncResult();
+    if (_connected) {
+      res = await ref.read(qrisSyncServiceProvider).syncNow();
+    }
     if (!mounted) return;
     setState(() => _syncing = false);
 
@@ -291,15 +306,15 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
       );
       return;
     }
-    final totalFound = res.newDrafts + res.autoSaved;
+    final totalFound = res.newDrafts + res.autoSaved + notifAdded;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           totalFound == 0
-              ? 'Tidak ada email QRIS baru ditemukan'
+              ? 'Tidak ada transaksi baru dari Gmail atau Notifikasi'
               : (res.autoSaved > 0
-                    ? '${res.autoSaved} transaksi QRIS otomatis tersimpan'
-                    : '${res.newDrafts} transaksi QRIS baru masuk antrean review'),
+                    ? '${res.autoSaved} transaksi otomatis tersimpan'
+                    : '${res.newDrafts + notifAdded} transaksi baru masuk antrean review'),
         ),
       ),
     );
@@ -501,6 +516,9 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
   @override
   Widget build(BuildContext context) {
     final draftsAsync = ref.watch(pendingQrisDraftsProvider);
+    final notifStatus = ref
+        .watch(notificationCaptureStatusProvider)
+        .valueOrNull;
     final wallets =
         ref.watch(walletsWithBalancesProvider).valueOrNull ?? const [];
     final allPockets =
@@ -513,7 +531,7 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Auto QRIS (Gmail)'),
+        title: const Text('Auto Catat (Gmail & Notif)'),
         actions: [
           if (_connected)
             IconButton(
@@ -552,6 +570,82 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
                 children: [
+                  // Status Auto-Catat dari Notifikasi HP (100% Lokal, Opsional)
+                  Card(
+                    color: (notifStatus?.isActive ?? false)
+                        ? cs.secondaryContainer.withValues(alpha: 0.35)
+                        : null,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        children: [
+                          SwitchListTile(
+                            secondary: Icon(
+                              Icons.notifications_active_outlined,
+                              color: (notifStatus?.isActive ?? false)
+                                  ? cs.primary
+                                  : cs.onSurfaceVariant,
+                            ),
+                            title: const Text('Auto-Catat Notifikasi HP'),
+                            subtitle: Text(
+                              (notifStatus?.isActive ?? false)
+                                  ? 'Aktif • Menangkap notifikasi bank & e-wallet secara lokal (GoPay, BCA, Mandiri, DANA, OVO, SeaBank, dll.)'
+                                  : (notifStatus?.enabledInApp == true &&
+                                            !(notifStatus
+                                                    ?.osPermissionGranted ??
+                                                false)
+                                        ? 'Izin Akses Notifikasi Android belum diaktifkan'
+                                        : 'Opsional (100% lokal di HP) — tangkap transaksi yang tidak mengirim email'),
+                            ),
+                            value: notifStatus?.enabledInApp ?? false,
+                            onChanged: (v) async {
+                              final svc = ref.read(
+                                notificationCaptureServiceProvider,
+                              );
+                              await svc.setEnabled(v);
+                              ref.invalidate(notificationCaptureStatusProvider);
+                              if (v) {
+                                final granted = await svc
+                                    .isOsPermissionGranted();
+                                if (!granted && context.mounted) {
+                                  await svc.openOsListenerSettings();
+                                }
+                              }
+                            },
+                          ),
+                          if (notifStatus?.enabledInApp == true &&
+                              !(notifStatus?.osPermissionGranted ?? false))
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                              child: SizedBox(
+                                width: double.infinity,
+                                child: FilledButton.tonalIcon(
+                                  onPressed: () async {
+                                    await ref
+                                        .read(
+                                          notificationCaptureServiceProvider,
+                                        )
+                                        .openOsListenerSettings();
+                                    ref.invalidate(
+                                      notificationCaptureStatusProvider,
+                                    );
+                                  },
+                                  icon: const Icon(
+                                    Icons.settings_applications_outlined,
+                                    size: 18,
+                                  ),
+                                  label: const Text(
+                                    'Buka Izin Akses Notifikasi Android',
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+
                   // Status Koneksi Gmail
                   Card(
                     color: _connected
