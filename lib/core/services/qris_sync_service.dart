@@ -334,7 +334,9 @@ class QrisSyncService {
   Future<void> dismissDraft(int draftId) =>
       _db.markQrisDraftStatus(draftId, 'dismissed');
 
-  /// Abaikan seluruh antrean review pending yang tanggal transaksinya <= [cutoffDayKey].
+  /// Hapus antrean review pending yang tanggal transaksinya <= [cutoffDayKey].
+  /// Dihapus (bukan ditandai dismissed) agar jika pengguna memundurkan batas tanggal
+  /// ke hari sebelumnya di kemudian hari, email tersebut bisa masuk kembali saat sinkron.
   Future<int> dismissPendingDraftsOnOrBefore(int cutoffDayKey) async {
     final pending = await (_db.select(
       _db.importedQrisDrafts,
@@ -344,10 +346,30 @@ class QrisSyncService {
       final occurred = DateTime.fromMillisecondsSinceEpoch(draft.occurredAt)
           .toLocal();
       if (shouldIgnoreTransactionDate(occurred, cutoffDayKey)) {
-        await _db.markQrisDraftStatus(draft.id, 'dismissed');
+        await (_db.delete(
+          _db.importedQrisDrafts,
+        )..where((d) => d.id.equals(draft.id))).go();
         removed++;
       }
     }
     return removed;
+  }
+
+  /// Pulihkan draft yang sebelumnya berstatus 'dismissed' namun tanggal transaksinya
+  /// lolos filter batas tanggal terbaru ([cutoffDayKey]) kembali ke antrean 'pending'.
+  Future<int> restoreDismissedDraftsAfter(int? cutoffDayKey) async {
+    final dismissed = await (_db.select(
+      _db.importedQrisDrafts,
+    )..where((d) => d.status.equals('dismissed'))).get();
+    var restored = 0;
+    for (final draft in dismissed) {
+      final occurred = DateTime.fromMillisecondsSinceEpoch(draft.occurredAt)
+          .toLocal();
+      if (!shouldIgnoreTransactionDate(occurred, cutoffDayKey)) {
+        await _db.markQrisDraftStatus(draft.id, 'pending');
+        restored++;
+      }
+    }
+    return restored;
   }
 }

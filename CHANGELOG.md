@@ -1,5 +1,9 @@
 # Catatan Rilis Sakuin
 
+## v1.5.2
+### Perbaikan
+- **Perbaikan Filter Batas Tanggal Auto QRIS (Gmail):** Antrean lama yang dibersihkan saat mengatur batas tanggal kini dihapus bersih (tidak ditandai *dismissed* permanen), sehingga ketika batas tanggal dimundurkan (mis. dari 26 Nov ke 25 Nov) atau dihapus, transaksi setelah batas baru otomatis muncul kembali & langsung disinkron ulang. Ditambahkan juga tombol **Pulihkan** (`↺`) di pojok atas layar Auto QRIS untuk mengembalikan transaksi yang sempat tersembunyi sebelumnya.
+
 ## v1.5.1
 ### Perbaikan Kritis
 - **Perbaikan Force Close Saat Membuka Aplikasi (`v1.5.0`):** Menambahkan aturan ProGuard/R8 Full Mode lengkap untuk `WorkManager`, `AndroidX Startup`, `RoomDatabase`, `Google ML Kit`, dan `Firebase ComponentRegistrar` yang sebelumnya terpotong oleh R8 saat build release, serta menambahkan pelindung `Throwable` pada handler native Android.

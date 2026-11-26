@@ -149,18 +149,43 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
     );
     if (picked == null || !mounted) return;
 
+    final prevCutoff = _ignoreOnOrBeforeDayKey;
     final dayKey = AppDateUtils.toDayKey(picked);
     setState(() => _ignoreOnOrBeforeDayKey = dayKey);
     await _savePreferencesOnly();
 
     if (!mounted) return;
+    final dateLabel = AppDateUtils.formatShortDate(picked);
+
+    // Jika batas tanggal dimundurkan (mis. dari 26 Nov -> 25 Nov), pulihkan draft yang
+    // sempat ter-dismiss di rentang setelah batas baru lalu sinkron ulang otomatis.
+    if (prevCutoff != null && dayKey < prevCutoff) {
+      final restored = await ref
+          .read(qrisSyncServiceProvider)
+          .restoreDismissedDraftsAfter(dayKey);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              restored > 0
+                  ? 'Batas dimundurkan ke $dateLabel • $restored transaksi dipulihkan ke antrean'
+                  : 'Batas dimundurkan ke $dateLabel • menyinkronkan ulang email...',
+            ),
+          ),
+        );
+      }
+      if (_connected) {
+        await _syncNow();
+      }
+      return;
+    }
+
     final pending = ref.read(pendingQrisDraftsProvider).valueOrNull ?? const [];
     final affectedCount = pending.where((d) {
       final dt = DateTime.fromMillisecondsSinceEpoch(d.occurredAt).toLocal();
       return QrisSyncService.shouldIgnoreTransactionDate(dt, dayKey);
     }).length;
 
-    final dateLabel = AppDateUtils.formatShortDate(picked);
     if (affectedCount > 0) {
       final cleanNow = await showDialog<bool>(
         context: context,
@@ -213,10 +238,41 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
   Future<void> _clearIgnoreCutoffDate() async {
     setState(() => _ignoreOnOrBeforeDayKey = null);
     await _savePreferencesOnly();
+    final restored = await ref
+        .read(qrisSyncServiceProvider)
+        .restoreDismissedDraftsAfter(null);
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Batas tanggal sinkron dihapus')),
+        SnackBar(
+          content: Text(
+            restored > 0
+                ? 'Batas tanggal dihapus & $restored transaksi dipulihkan'
+                : 'Batas tanggal sinkron dihapus',
+          ),
+        ),
       );
+    }
+    if (_connected) {
+      await _syncNow();
+    }
+  }
+
+  Future<void> _restoreDismissedNow() async {
+    final restored = await ref
+        .read(qrisSyncServiceProvider)
+        .restoreDismissedDraftsAfter(_ignoreOnOrBeforeDayKey);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          restored > 0
+              ? '$restored transaksi QRIS dipulihkan ke antrean review'
+              : 'Tidak ada transaksi diabaikan yang cocok dengan batas tanggal saat ini',
+        ),
+      ),
+    );
+    if (_connected) {
+      await _syncNow();
     }
   }
 
@@ -425,6 +481,12 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
       appBar: AppBar(
         title: const Text('Auto QRIS (Gmail)'),
         actions: [
+          if (_connected)
+            IconButton(
+              tooltip: 'Pulihkan antrean yang sempat dibersihkan/diabaikan',
+              icon: const Icon(Icons.restore_rounded),
+              onPressed: _syncing ? null : _restoreDismissedNow,
+            ),
           if (_connected)
             IconButton(
               tooltip: 'Sinkron email sekarang',
