@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Koin atas -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M54,24a10,10 0 1,0 0,20a10,10 0 1,0 0,-20z" />
+    <!-- Badan dompet dengan cutout kancing -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M34,38H74C77.31,38 80,40.69 80,44V72C80,76.42 76.42,80 72,80H36C31.58,80 28,76.42 28,72V44C28,40.69 30.69,38 34,38ZM61.5,56.2a3.3,3.3 0 1,0 0,6.6a3.3,3.3 0 1,0 0,-6.6z" />
+</vector>

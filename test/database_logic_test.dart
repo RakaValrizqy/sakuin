@@ -330,4 +330,137 @@ void main() {
       expect(String.fromCharCodes(pdfBytes.take(5)), '%PDF-');
     });
   });
+
+  group('Pos Budget di Dalam Satu Saku (Wallet Pockets)', () {
+    test('membagi saldo Mandiri 500k -> Harian 200k + Tabungan 300k, pindah pos, transfer lintas saku, & transaksi per pos', () async {
+      final mandiriId = await createWallet('Mandiri', 500000);
+      final bcaId = await createWallet('BCA', 1000000);
+
+      final harianId = await db
+          .into(db.walletPockets)
+          .insert(
+            WalletPocketsCompanion.insert(
+              walletId: mandiriId,
+              name: 'Uang Harian',
+              icon: 'food',
+              color: 0xFFEA580C,
+            ),
+          );
+      final tabunganId = await db
+          .into(db.walletPockets)
+          .insert(
+            WalletPocketsCompanion.insert(
+              walletId: mandiriId,
+              name: 'Tabungan',
+              icon: 'savings',
+              color: 0xFF15803D,
+            ),
+          );
+
+      // 1. Alokasi manual: 200k ke Uang Harian & 300k ke Tabungan
+      await db.allocateOrMovePocket(
+        walletId: mandiriId,
+        fromPocketId: null,
+        toPocketId: harianId,
+        amount: 200000,
+      );
+      await db.allocateOrMovePocket(
+        walletId: mandiriId,
+        fromPocketId: null,
+        toPocketId: tabunganId,
+        amount: 300000,
+      );
+
+      var pockets = await db.getPocketsForWallet(mandiriId);
+      expect(
+        pockets.firstWhere((p) => p.pocket.id == harianId).balance,
+        200000,
+      );
+      expect(
+        pockets.firstWhere((p) => p.pocket.id == tabunganId).balance,
+        300000,
+      );
+      expect(await db.getWalletUnallocatedBalance(mandiriId), 0);
+      expect((await db.getWalletWithBalance(mandiriId))?.balance, 500000);
+
+      // 2. Transfer antar budget di saku yang sama (Harian -> Tabungan 50k)
+      await db.allocateOrMovePocket(
+        walletId: mandiriId,
+        fromPocketId: harianId,
+        toPocketId: tabunganId,
+        amount: 50000,
+      );
+      pockets = await db.getPocketsForWallet(mandiriId);
+      expect(
+        pockets.firstWhere((p) => p.pocket.id == harianId).balance,
+        150000,
+      );
+      expect(
+        pockets.firstWhere((p) => p.pocket.id == tabunganId).balance,
+        350000,
+      );
+      expect((await db.getWalletWithBalance(mandiriId))?.balance, 500000);
+
+      // 3. Transfer dari saku lain (BCA -> Mandiri: Tabungan Rp 100k, fee 2.5k)
+      final now = DateTime(2026, 11, 26, 10, 0);
+      await db.saveTransactionWithMemory(
+        type: 'transfer',
+        amount: 100000,
+        walletId: bcaId,
+        toWalletId: mandiriId,
+        toPocketId: tabunganId,
+        fee: 2500,
+        occurredAt: now,
+        updateItemMemory: false,
+      );
+      pockets = await db.getPocketsForWallet(mandiriId);
+      expect(
+        pockets.firstWhere((p) => p.pocket.id == tabunganId).balance,
+        450000,
+      );
+      expect((await db.getWalletWithBalance(mandiriId))?.balance, 600000);
+      expect((await db.getWalletWithBalance(bcaId))?.balance, 897500);
+
+      // 4. Pengeluaran 25k dari Mandiri -> Uang Harian
+      final foodCatId = await db.findCategoryIdByName(
+        'Makanan & Minuman',
+        'expense',
+      );
+      await db.saveTransactionWithMemory(
+        type: 'expense',
+        amount: 25000,
+        walletId: mandiriId,
+        pocketId: harianId,
+        categoryId: foodCatId,
+        itemName: 'Makan siang',
+        occurredAt: now,
+      );
+      pockets = await db.getPocketsForWallet(mandiriId);
+      expect(
+        pockets.firstWhere((p) => p.pocket.id == harianId).balance,
+        125000,
+      );
+      expect((await db.getWalletWithBalance(mandiriId))?.balance, 575000);
+      expect(await db.getWalletUnallocatedBalance(mandiriId), 0);
+
+      // 5. Backup & Restore v2 mempertahankan seluruh pos budget & saldonya
+      final backupSvc = BackupService(db);
+      final json = await backupSvc.buildJsonBackup();
+      final preview = backupSvc.parseBackupJson(json);
+
+      final db2 = AppDatabase(NativeDatabase.memory());
+      addTearDown(db2.close);
+      await BackupService(db2).restoreBackup(preview, replaceExisting: true);
+      final restoredPockets = await db2.getPocketsForWallet(mandiriId);
+      expect(restoredPockets.length, 2);
+      expect(
+        restoredPockets.firstWhere((p) => p.pocket.id == tabunganId).balance,
+        450000,
+      );
+      expect(
+        restoredPockets.firstWhere((p) => p.pocket.id == harianId).balance,
+        125000,
+      );
+    });
+  });
 }

@@ -38,8 +38,14 @@ class TransactionTile extends StatelessWidget {
     final time = DateTime.fromMillisecondsSinceEpoch(tx.occurredAt).toLocal();
 
     final isTransfer = tx.type == 'transfer';
+    final fromLabel = detail.pocketName != null
+        ? '${detail.wallet.name} (${detail.pocketName})'
+        : detail.wallet.name;
+    final toLabel = detail.toPocketName != null
+        ? '${detail.toWallet?.name ?? "-"} (${detail.toPocketName})'
+        : (detail.toWallet?.name ?? '-');
     final title = isTransfer
-        ? '${detail.wallet.name} → ${detail.toWallet?.name ?? "-"}'
+        ? '$fromLabel → $toLabel'
         : (tx.itemName != null && tx.itemName!.trim().isNotEmpty
               ? tx.itemName!.trim()
               : (detail.category?.name ?? 'Transaksi'));
@@ -49,7 +55,7 @@ class TransactionTile extends StatelessWidget {
       subtitleParts.add(detail.category!.name);
     }
     if (!isTransfer) {
-      subtitleParts.add(detail.wallet.name);
+      subtitleParts.add(fromLabel);
     }
     if (isTransfer && tx.fee > 0) {
       subtitleParts.add('Admin ${CurrencyFormatter.format(tx.fee)}');

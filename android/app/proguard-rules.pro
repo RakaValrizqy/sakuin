@@ -19,3 +19,6 @@
 -keep class androidx.security.crypto.** { *; }
 -dontwarn com.google.crypto.tink.**
 -dontwarn javax.annotation.**
+
+# FileProvider untuk auto-update APK dari cache internal
+-keep class androidx.core.content.FileProvider { *; }

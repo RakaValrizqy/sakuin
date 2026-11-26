@@ -108,16 +108,23 @@ class _WalletListScreenState extends ConsumerState<WalletListScreen> {
   @override
   Widget build(BuildContext context) {
     final allWalletsAsync = ref.watch(allWalletsWithBalancesProvider);
+    final allPockets =
+        ref.watch(allActivePocketsProvider).valueOrNull ?? const [];
     final totalBalance = ref.watch(totalBalanceProvider);
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
+
+    final pocketsByWallet = <int, List<PocketWithBalance>>{};
+    for (final p in allPockets) {
+      pocketsByWallet.putIfAbsent(p.pocket.walletId, () => []).add(p);
+    }
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Saku & Dompet'),
         actions: [
           IconButton(
-            tooltip: 'Transfer antar dompet',
+            tooltip: 'Transfer antar dompet / budget',
             icon: const Icon(Icons.swap_horiz_rounded),
             onPressed: () => showTransferSheet(context),
           ),
@@ -184,7 +191,7 @@ class _WalletListScreenState extends ConsumerState<WalletListScreen> {
                             ),
                           ),
                           FilledButton.tonalIcon(
-                            onPressed: active.length >= 2
+                            onPressed: active.isNotEmpty
                                 ? () => showTransferSheet(context)
                                 : null,
                             icon: const Icon(Icons.swap_horiz_rounded),
@@ -201,7 +208,7 @@ class _WalletListScreenState extends ConsumerState<WalletListScreen> {
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                     child: Text(
-                      'Tarik ikon garis di kanan untuk mengatur urutan dompet',
+                      'Ketuk saku untuk membagi pos budget • Tarik ikon garis untuk ubah urutan',
                       style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
                     ),
                   ),
@@ -216,6 +223,8 @@ class _WalletListScreenState extends ConsumerState<WalletListScreen> {
                 },
                 itemBuilder: (ctx, index) {
                   final wb = active[index];
+                  final walletPockets =
+                      pocketsByWallet[wb.wallet.id] ?? const [];
                   return Padding(
                     key: ValueKey('wallet_${wb.wallet.id}'),
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
@@ -233,99 +242,148 @@ class _WalletListScreenState extends ConsumerState<WalletListScreen> {
                             horizontal: 14,
                             vertical: 12,
                           ),
-                          child: Row(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              CategoryIconBadge(
-                                iconKey: wb.wallet.icon,
-                                colorValue: wb.wallet.color,
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
+                              Row(
+                                children: [
+                                  CategoryIconBadge(
+                                    iconKey: wb.wallet.icon,
+                                    colorValue: wb.wallet.color,
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        Flexible(
-                                          child: Text(
-                                            wb.wallet.name,
-                                            style: tt.titleMedium,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
+                                        Row(
+                                          children: [
+                                            Flexible(
+                                              child: Text(
+                                                wb.wallet.name,
+                                                style: tt.titleMedium,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            if (!wb.wallet.includeInTotal) ...[
+                                              const SizedBox(width: 6),
+                                              Icon(
+                                                Icons.visibility_off_outlined,
+                                                size: 16,
+                                                color: cs.onSurfaceVariant,
+                                              ),
+                                            ],
+                                          ],
                                         ),
-                                        if (!wb.wallet.includeInTotal) ...[
-                                          const SizedBox(width: 6),
-                                          Icon(
-                                            Icons.visibility_off_outlined,
-                                            size: 16,
+                                        Text(
+                                          walletTypeLabel(wb.wallet.type),
+                                          style: tt.bodySmall?.copyWith(
                                             color: cs.onSurfaceVariant,
                                           ),
-                                        ],
+                                        ),
                                       ],
                                     ),
-                                    Text(
-                                      walletTypeLabel(wb.wallet.type),
-                                      style: tt.bodySmall?.copyWith(
+                                  ),
+                                  AmountText(
+                                    amount: wb.balance,
+                                    style: tt.titleMedium?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  PopupMenuButton<String>(
+                                    onSelected: (action) {
+                                      switch (action) {
+                                        case 'pockets':
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) =>
+                                                  WalletDetailScreen(
+                                                    walletId: wb.wallet.id,
+                                                  ),
+                                            ),
+                                          );
+                                        case 'edit':
+                                          showWalletFormSheet(
+                                            context,
+                                            existing: wb.wallet,
+                                          );
+                                        case 'transfer':
+                                          showTransferSheet(
+                                            context,
+                                            initialFromWalletId: wb.wallet.id,
+                                          );
+                                        case 'adjust':
+                                          _showBalanceCorrectionDialog(wb);
+                                        case 'delete':
+                                          _deleteOrArchive(wb);
+                                      }
+                                    },
+                                    itemBuilder: (_) => const [
+                                      PopupMenuItem(
+                                        value: 'pockets',
+                                        child: Text('Atur pos budget'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'edit',
+                                        child: Text('Edit dompet'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'transfer',
+                                        child: Text('Transfer dari sini'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'adjust',
+                                        child: Text('Koreksi saldo'),
+                                      ),
+                                      PopupMenuItem(
+                                        value: 'delete',
+                                        child: Text('Arsipkan / Hapus'),
+                                      ),
+                                    ],
+                                  ),
+                                  ReorderableDragStartListener(
+                                    index: index,
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(6),
+                                      child: Icon(
+                                        Icons.drag_handle_rounded,
                                         color: cs.onSurfaceVariant,
                                       ),
                                     ),
-                                  ],
-                                ),
-                              ),
-                              AmountText(
-                                amount: wb.balance,
-                                style: tt.titleMedium?.copyWith(
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                              PopupMenuButton<String>(
-                                onSelected: (action) {
-                                  switch (action) {
-                                    case 'edit':
-                                      showWalletFormSheet(
-                                        context,
-                                        existing: wb.wallet,
-                                      );
-                                    case 'transfer':
-                                      showTransferSheet(
-                                        context,
-                                        initialFromWalletId: wb.wallet.id,
-                                      );
-                                    case 'adjust':
-                                      _showBalanceCorrectionDialog(wb);
-                                    case 'delete':
-                                      _deleteOrArchive(wb);
-                                  }
-                                },
-                                itemBuilder: (_) => const [
-                                  PopupMenuItem(
-                                    value: 'edit',
-                                    child: Text('Edit dompet'),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'transfer',
-                                    child: Text('Transfer dari sini'),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'adjust',
-                                    child: Text('Koreksi saldo'),
-                                  ),
-                                  PopupMenuItem(
-                                    value: 'delete',
-                                    child: Text('Arsipkan / Hapus'),
                                   ),
                                 ],
                               ),
-                              ReorderableDragStartListener(
-                                index: index,
-                                child: Padding(
-                                  padding: const EdgeInsets.all(6),
-                                  child: Icon(
-                                    Icons.drag_handle_rounded,
-                                    color: cs.onSurfaceVariant,
-                                  ),
+                              if (walletPockets.isNotEmpty) ...[
+                                const SizedBox(height: 10),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children: [
+                                    for (final p in walletPockets)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 4,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Color(p.pocket.color)
+                                              .withValues(alpha: 0.13),
+                                          borderRadius: BorderRadius.circular(
+                                            10,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          '${p.pocket.name}: ${CurrencyFormatter.formatCompact(p.balance)}',
+                                          style: tt.labelSmall?.copyWith(
+                                            color: Color(p.pocket.color),
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
                                 ),
-                              ),
+                              ],
                             ],
                           ),
                         ),

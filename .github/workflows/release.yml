@@ -167,20 +167,36 @@ jobs:
           path: build/symbols/**
           retention-days: 30
 
+      - name: Ekstrak catatan rilis dari CHANGELOG.md
+        id: changelog
+        env:
+          VERSION_NAME: ${{ steps.version.outputs.version_name }}
+          VERSION_CODE: ${{ steps.version.outputs.version_code }}
+        run: |
+          NOTES=$(awk -v ver="## v${VERSION_NAME}" '
+            $0 == ver { found=1; next }
+            /^## v/ && found { exit }
+            found { print }
+          ' CHANGELOG.md || true)
+
+          if [ -z "$NOTES" ]; then
+            NOTES="- Peningkatan performa, stabilitas, dan perbaikan bug."
+          fi
+
+          cat <<EOF > release-notes.md
+          ${NOTES}
+
+          ---
+          **Versi:** v${VERSION_NAME} (Build ${VERSION_CODE}) — Update tanpa uninstall, seluruh data tetap aman.
+          EOF
+
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/v') || inputs.create_github_release == true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag_name }}
           name: Sakuin v${{ steps.version.outputs.version_name }}
-          generate_release_notes: true
-          body: |
-            ## Sakuin v${{ steps.version.outputs.version_name }} (Build `${{ steps.version.outputs.version_code }}`)
-
-            ### Cara Install / Update Tanpa Uninstall
-            1. Untuk HP Android modern (termasuk Redmi Note 11 Pro 5G), unduh **`app-arm64-v8a-release.apk`**.
-            2. Buka file APK dan ketuk **Update / Perbarui** — data transaksi, dompet, hutang, dan pengaturan akan tetap aman tanpa perlu uninstall aplikasi lama.
-            3. Pastikan selalu memasang varian ABI yang sama (`arm64-v8a`) pada setiap update.
+          body_path: release-notes.md
           files: |
             release-assets/app-arm64-v8a-release.apk
             release-assets/app-armeabi-v7a-release.apk

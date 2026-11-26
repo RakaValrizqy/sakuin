@@ -9,6 +9,7 @@ import 'package:sakuin/core/utils/currency_formatter.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/utils/haptics.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
+import 'package:sakuin/features/transaction/transaction_providers.dart';
 import 'package:sakuin/features/wallet/wallet_providers.dart';
 
 Future<bool?> showTransferSheet(
@@ -39,6 +40,8 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
 
   int? _fromWalletId;
   int? _toWalletId;
+  int? _fromPocketId; // null = Saldo Bebas
+  int? _toPocketId; // null = Saldo Bebas
   DateTime _date = DateTime.now();
   bool _saving = false;
 
@@ -74,12 +77,31 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
       );
       return;
     }
-    if (_fromWalletId == _toWalletId) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Dompet asal dan tujuan tidak boleh sama'),
-        ),
-      );
+
+    final isSameWallet = _fromWalletId == _toWalletId;
+    if (isSameWallet) {
+      if (_fromPocketId == _toPocketId) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Untuk transfer dalam saku yang sama, pilih pos budget asal & tujuan yang berbeda',
+            ),
+          ),
+        );
+        return;
+      }
+      setState(() => _saving = true);
+      await ref
+          .read(walletActionsProvider)
+          .allocateOrMovePocket(
+            walletId: _fromWalletId!,
+            fromPocketId: _fromPocketId,
+            toPocketId: _toPocketId,
+            amount: amount,
+            note: _noteCtrl.text.trim(),
+          );
+      AppHaptics.light(ref.read(settingsProvider).hapticsEnabled);
+      if (mounted) Navigator.of(context).pop(true);
       return;
     }
 
@@ -90,11 +112,14 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
       amount: amount,
       walletId: _fromWalletId!,
       toWalletId: _toWalletId!,
+      pocketId: _fromPocketId,
+      toPocketId: _toPocketId,
       fee: fee,
       note: _noteCtrl.text.trim(),
       occurredAt: _date,
       updateItemMemory: false,
     );
+    ref.read(transactionRevisionProvider.notifier).state++;
     await ref.read(settingsProvider.notifier).setLastWalletId(_fromWalletId!);
     AppHaptics.light(ref.read(settingsProvider).hapticsEnabled);
 
@@ -105,19 +130,41 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
   Widget build(BuildContext context) {
     final wallets =
         ref.watch(walletsWithBalancesProvider).valueOrNull ?? const [];
+    final allPockets =
+        ref.watch(allActivePocketsProvider).valueOrNull ?? const [];
+
     if (_fromWalletId == null && wallets.isNotEmpty) {
       _fromWalletId = wallets.first.wallet.id;
     }
-    if (_toWalletId == null && wallets.length >= 2) {
-      _toWalletId = wallets
-          .firstWhere(
-            (w) => w.wallet.id != _fromWalletId,
-            orElse: () => wallets.last,
-          )
-          .wallet
-          .id;
+    if (_toWalletId == null && wallets.isNotEmpty) {
+      _toWalletId = wallets.length >= 2
+          ? wallets
+                .firstWhere(
+                  (w) => w.wallet.id != _fromWalletId,
+                  orElse: () => wallets.last,
+                )
+                .wallet
+                .id
+          : wallets.first.wallet.id;
     }
 
+    final fromPockets = allPockets
+        .where((p) => p.pocket.walletId == _fromWalletId)
+        .toList();
+    final toPockets = allPockets
+        .where((p) => p.pocket.walletId == _toWalletId)
+        .toList();
+
+    if (_fromPocketId != null &&
+        !fromPockets.any((p) => p.pocket.id == _fromPocketId)) {
+      _fromPocketId = null;
+    }
+    if (_toPocketId != null &&
+        !toPockets.any((p) => p.pocket.id == _toPocketId)) {
+      _toPocketId = null;
+    }
+
+    final isSameWallet = _fromWalletId != null && _fromWalletId == _toWalletId;
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
 
@@ -136,24 +183,21 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
                   color: AppColors.transfer(context),
                 ),
                 const SizedBox(width: 8),
-                Text('Transfer Antar Saku', style: tt.headlineSmall),
+                Text('Transfer Saku / Budget', style: tt.headlineSmall),
               ],
             ),
             const SizedBox(height: 6),
             Text(
-              'Transfer tidak dihitung sebagai pemasukan/pengeluaran, kecuali biaya admin (masuk kategori Biaya Admin).',
+              'Bisa transfer antar saku, langsung ke pos budget tertentu, atau pindah antar budget di saku yang sama.',
               style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
             ),
             const SizedBox(height: 16),
-
-            if (wallets.length < 2) ...[
+            if (wallets.isEmpty) ...[
               Card(
                 color: cs.errorContainer.withValues(alpha: 0.4),
                 child: const Padding(
                   padding: EdgeInsets.all(16),
-                  child: Text(
-                    'Minimal butuh 2 dompet aktif untuk melakukan transfer.',
-                  ),
+                  child: Text('Buat dompet terlebih dahulu untuk transfer.'),
                 ),
               ),
               const SizedBox(height: 12),
@@ -184,10 +228,35 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
                       ),
                     ),
                 ],
-                onChanged: (v) => setState(() => _fromWalletId = v),
+                onChanged: (v) => setState(() {
+                  _fromWalletId = v;
+                  _fromPocketId = null;
+                }),
               ),
+              if (fromPockets.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                DropdownButtonFormField<int?>(
+                  initialValue: _fromPocketId,
+                  decoration: const InputDecoration(
+                    labelText: 'Dari Pos Budget (opsional)',
+                  ),
+                  items: [
+                    const DropdownMenuItem<int?>(
+                      value: null,
+                      child: Text('Saldo Bebas'),
+                    ),
+                    for (final p in fromPockets)
+                      DropdownMenuItem<int?>(
+                        value: p.pocket.id,
+                        child: Text(
+                          '${p.pocket.name} (${CurrencyFormatter.format(p.balance)})',
+                        ),
+                      ),
+                  ],
+                  onChanged: (v) => setState(() => _fromPocketId = v),
+                ),
+              ],
               const SizedBox(height: 12),
-
               Text('Ke Dompet', style: tt.labelMedium),
               const SizedBox(height: 8),
               DropdownButtonFormField<int>(
@@ -214,76 +283,102 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
                       ),
                     ),
                 ],
-                onChanged: (v) => setState(() => _toWalletId = v),
+                onChanged: (v) => setState(() {
+                  _toWalletId = v;
+                  _toPocketId = null;
+                }),
               ),
+              if (toPockets.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                DropdownButtonFormField<int?>(
+                  initialValue: _toPocketId,
+                  decoration: const InputDecoration(
+                    labelText: 'Ke Pos Budget (opsional)',
+                  ),
+                  items: [
+                    const DropdownMenuItem<int?>(
+                      value: null,
+                      child: Text('Saldo Bebas'),
+                    ),
+                    for (final p in toPockets)
+                      DropdownMenuItem<int?>(
+                        value: p.pocket.id,
+                        child: Text(
+                          '${p.pocket.name} (${CurrencyFormatter.format(p.balance)})',
+                        ),
+                      ),
+                  ],
+                  onChanged: (v) => setState(() => _toPocketId = v),
+                ),
+              ],
               const SizedBox(height: 14),
-
               TextField(
                 controller: _amountCtrl,
                 keyboardType: TextInputType.text,
                 decoration: const InputDecoration(
                   labelText: 'Nominal transfer',
                   prefixText: 'Rp ',
-                  hintText: 'Contoh: 500k atau 1,5jt',
+                  hintText: 'Contoh: 200k atau 1,5jt',
                 ),
               ),
-              const SizedBox(height: 12),
-
-              TextField(
-                controller: _feeCtrl,
-                keyboardType: TextInputType.text,
-                decoration: const InputDecoration(
-                  labelText: 'Biaya admin (opsional)',
-                  prefixText: 'Rp ',
-                  hintText: 'Contoh: 2500 atau 6,5k',
+              if (!isSameWallet) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _feeCtrl,
+                  keyboardType: TextInputType.text,
+                  decoration: const InputDecoration(
+                    labelText: 'Biaya admin (opsional)',
+                    prefixText: 'Rp ',
+                    hintText: 'Contoh: 2500 atau 6,5k',
+                  ),
                 ),
-              ),
-              const SizedBox(height: 12),
-
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.calendar_today_rounded),
-                title: const Text('Tanggal'),
-                trailing: Text(
-                  AppDateUtils.formatDayDate(_date),
-                  style: tt.titleSmall,
+                const SizedBox(height: 12),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.calendar_today_rounded),
+                  title: const Text('Tanggal'),
+                  trailing: Text(
+                    AppDateUtils.formatDayDate(_date),
+                    style: tt.titleSmall,
+                  ),
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: _date,
+                      firstDate: DateTime(2000),
+                      lastDate: DateTime(2100),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _date = DateTime(
+                          picked.year,
+                          picked.month,
+                          picked.day,
+                          _date.hour,
+                          _date.minute,
+                        );
+                      });
+                    }
+                  },
                 ),
-                onTap: () async {
-                  final picked = await showDatePicker(
-                    context: context,
-                    initialDate: _date,
-                    firstDate: DateTime(2000),
-                    lastDate: DateTime(2100),
-                  );
-                  if (picked != null) {
-                    setState(() {
-                      _date = DateTime(
-                        picked.year,
-                        picked.month,
-                        picked.day,
-                        _date.hour,
-                        _date.minute,
-                      );
-                    });
-                  }
-                },
-              ),
-
+              ] else
+                const SizedBox(height: 12),
               TextField(
                 controller: _noteCtrl,
                 decoration: const InputDecoration(
                   labelText: 'Catatan (opsional)',
-                  hintText: 'Contoh: Top up e-wallet',
+                  hintText: 'Contoh: Pindah ke Tabungan',
                 ),
               ),
               const SizedBox(height: 18),
-
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
                   onPressed: _saving ? null : () => _save(wallets),
                   icon: const Icon(Icons.swap_horiz_rounded),
-                  label: const Text('Simpan Transfer'),
+                  label: Text(
+                    isSameWallet ? 'Pindah Budget di Saku' : 'Simpan Transfer',
+                  ),
                 ),
               ),
             ],

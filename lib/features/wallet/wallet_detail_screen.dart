@@ -8,6 +8,7 @@ import 'package:sakuin/core/utils/currency_formatter.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
+import 'package:sakuin/features/wallet/pocket_sheets.dart';
 import 'package:sakuin/features/wallet/transfer_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_form_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_providers.dart';
@@ -98,11 +99,35 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
     }
   }
 
+  Future<void> _deletePocket(PocketWithBalance pb) async {
+    final deleted = await ref
+        .read(walletActionsProvider)
+        .deleteOrArchivePocket(widget.walletId, pb.pocket.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          deleted
+              ? 'Pos "${pb.pocket.name}" dihapus (sisa saldo dikembalikan ke Saldo Bebas)'
+              : 'Pos "${pb.pocket.name}" diarsipkan (sisa saldo dikembalikan ke Saldo Bebas)',
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final wallets =
         ref.watch(allWalletsWithBalancesProvider).valueOrNull ?? const [];
     final wb = wallets.where((e) => e.wallet.id == widget.walletId).firstOrNull;
+    final pockets =
+        ref.watch(walletPocketsProvider(widget.walletId)).valueOrNull ??
+        const [];
+    final recentAllocations =
+        ref
+            .watch(walletRecentAllocationsProvider(widget.walletId))
+            .valueOrNull ??
+        const [];
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
 
@@ -112,6 +137,15 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
         body: const Center(child: Text('Dompet tidak ditemukan')),
       );
     }
+
+    var totalAllocated = 0;
+    for (final p in pockets) {
+      totalAllocated += p.balance;
+    }
+    final unallocated = wb.balance - totalAllocated;
+    final pocketNameById = {
+      for (final p in pockets) p.pocket.id: p.pocket.name,
+    };
 
     return Scaffold(
       appBar: AppBar(
@@ -127,8 +161,9 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
       body: RefreshIndicator(
         onRefresh: _loadData,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
           children: [
+            // Kartu Saldo Utama Saku
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(20),
@@ -144,20 +179,22 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
                           iconSize: 24,
                         ),
                         const SizedBox(width: 14),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              walletTypeLabel(wb.wallet.type),
-                              style: tt.bodyMedium?.copyWith(
-                                color: cs.onSurfaceVariant,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                walletTypeLabel(wb.wallet.type),
+                                style: tt.bodyMedium?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                ),
                               ),
-                            ),
-                            AmountText(
-                              amount: wb.balance,
-                              style: tt.headlineMedium,
-                            ),
-                          ],
+                              AmountText(
+                                amount: wb.balance,
+                                style: tt.headlineMedium,
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
@@ -191,6 +228,220 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
                 ),
               ),
             ),
+            const SizedBox(height: 18),
+
+            // Bagian Pembagian Budget (Pos di dalam Saku)
+            Row(
+              children: [
+                Expanded(
+                  child: Text('Pembagian Budget Saku', style: tt.titleMedium),
+                ),
+                if (pockets.isNotEmpty)
+                  TextButton.icon(
+                    onPressed: () => showPocketAllocateSheet(
+                      context,
+                      walletId: wb.wallet.id,
+                      walletName: wb.wallet.name,
+                      unallocatedBalance: unallocated,
+                      pockets: pockets,
+                    ),
+                    icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                    label: const Text('Pindah'),
+                  ),
+                FilledButton.tonalIcon(
+                  onPressed: () => showPocketFormSheet(
+                    context,
+                    walletId: wb.wallet.id,
+                    unallocatedBalance: unallocated,
+                  ),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('Pos'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Bar proporsi visual jika ada pos
+                    if (pockets.isNotEmpty && wb.balance > 0) ...[
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: SizedBox(
+                          height: 10,
+                          child: Row(
+                            children: [
+                              for (final p in pockets)
+                                if (p.balance > 0)
+                                  Expanded(
+                                    flex: p.balance,
+                                    child: Container(
+                                      color: Color(p.pocket.color),
+                                    ),
+                                  ),
+                              if (unallocated > 0)
+                                Expanded(
+                                  flex: unallocated,
+                                  child: Container(
+                                    color: cs.surfaceContainerHighest,
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    // Baris Saldo Bebas (Belum Dialokasikan)
+                    Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: cs.surfaceContainerHighest.withValues(
+                              alpha: 0.7,
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            Icons.account_balance_wallet_outlined,
+                            color: cs.onSurfaceVariant,
+                            size: 20,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Saldo Bebas', style: tt.titleSmall),
+                              Text(
+                                unallocated < 0
+                                    ? 'Alokasi melebihi saldo saku'
+                                    : 'Belum dialokasikan ke pos budget',
+                                style: tt.bodySmall?.copyWith(
+                                  color: unallocated < 0
+                                      ? AppColors.expense(context)
+                                      : cs.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        AmountText(
+                          amount: unallocated,
+                          type: unallocated < 0 ? 'expense' : null,
+                          style: tt.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    if (pockets.isEmpty) ...[
+                      const Divider(height: 22),
+                      Text(
+                        'Bagi saldo ${wb.wallet.name} menjadi beberapa pos budget (mis. Uang Harian & Tabungan) tanpa harus membuat saku terpisah.',
+                        style: tt.bodySmall?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                    ] else ...[
+                      const Divider(height: 22),
+                      for (var i = 0; i < pockets.length; i++) ...[
+                        if (i > 0) const Divider(height: 16),
+                        _PocketRow(
+                          item: pockets[i],
+                          onAllocate: () => showPocketAllocateSheet(
+                            context,
+                            walletId: wb.wallet.id,
+                            walletName: wb.wallet.name,
+                            unallocatedBalance: unallocated,
+                            pockets: pockets,
+                            initialFromPocketId: unallocated > 0
+                                ? null
+                                : pockets[i].pocket.id,
+                            initialToPocketId: unallocated > 0
+                                ? pockets[i].pocket.id
+                                : null,
+                          ),
+                          onEdit: () => showPocketFormSheet(
+                            context,
+                            walletId: wb.wallet.id,
+                            unallocatedBalance: unallocated,
+                            existing: pockets[i],
+                          ),
+                          onDelete: () => _deletePocket(pockets[i]),
+                        ),
+                      ],
+                    ],
+                  ],
+                ),
+              ),
+            ),
+
+            if (recentAllocations.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              ExpansionTile(
+                tilePadding: const EdgeInsets.symmetric(horizontal: 4),
+                title: Text(
+                  'Riwayat Alokasi Budget (${recentAllocations.length})',
+                  style: tt.titleSmall,
+                ),
+                children: [
+                  Card(
+                    child: Column(
+                      children: [
+                        for (
+                          var i = 0;
+                          i < recentAllocations.take(8).length;
+                          i++
+                        ) ...[
+                          if (i > 0) const Divider(height: 1),
+                          Builder(
+                            builder: (_) {
+                              final alloc = recentAllocations[i];
+                              final fromName = alloc.fromPocketId == null
+                                  ? 'Saldo Bebas'
+                                  : (pocketNameById[alloc.fromPocketId] ??
+                                        'Pos');
+                              final toName = alloc.toPocketId == null
+                                  ? 'Saldo Bebas'
+                                  : (pocketNameById[alloc.toPocketId] ?? 'Pos');
+                              final dt = DateTime.fromMillisecondsSinceEpoch(
+                                alloc.createdAt,
+                              ).toLocal();
+                              return ListTile(
+                                dense: true,
+                                leading: const Icon(
+                                  Icons.swap_horiz_rounded,
+                                  size: 20,
+                                ),
+                                title: Text('$fromName → $toName'),
+                                subtitle: Text(
+                                  '${AppDateUtils.formatShortDate(dt)}${alloc.note.isNotEmpty ? ' • ${alloc.note}' : ''}',
+                                ),
+                                trailing: AmountText(
+                                  amount: alloc.amount,
+                                  type: 'transfer',
+                                  style: tt.titleSmall,
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 16),
 
             // Mini chart 14 hari terakhir
@@ -265,6 +516,96 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
   }
 }
 
+class _PocketRow extends StatelessWidget {
+  const _PocketRow({
+    required this.item,
+    required this.onAllocate,
+    required this.onEdit,
+    required this.onDelete,
+  });
+
+  final PocketWithBalance item;
+  final VoidCallback onAllocate;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
+    final progress = item.targetProgress;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            CategoryIconBadge(
+              iconKey: item.pocket.icon,
+              colorValue: item.pocket.color,
+              size: 40,
+              iconSize: 20,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(item.pocket.name, style: tt.titleMedium),
+                  if (item.pocket.targetAmount != null &&
+                      item.pocket.targetAmount! > 0)
+                    Text(
+                      'Target ${CurrencyFormatter.format(item.pocket.targetAmount!)}',
+                      style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                    ),
+                ],
+              ),
+            ),
+            AmountText(
+              amount: item.balance,
+              type: item.balance < 0 ? 'expense' : null,
+              style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            PopupMenuButton<String>(
+              onSelected: (v) {
+                if (v == 'move') onAllocate();
+                if (v == 'edit') onEdit();
+                if (v == 'delete') onDelete();
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'move',
+                  child: Text('Alokasi / Pindah budget'),
+                ),
+                PopupMenuItem(
+                  value: 'edit',
+                  child: Text('Edit & atur saldo manual'),
+                ),
+                PopupMenuItem(
+                  value: 'delete',
+                  child: Text('Hapus / Arsipkan pos'),
+                ),
+              ],
+            ),
+          ],
+        ),
+        if (progress != null) ...[
+          const SizedBox(height: 8),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(5),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 6,
+              color: Color(item.pocket.color),
+              backgroundColor: cs.surfaceContainerHighest,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
 class _WalletTxRow extends StatelessWidget {
   const _WalletTxRow({required this.detail, required this.currentWalletId});
 
@@ -279,9 +620,13 @@ class _WalletTxRow extends StatelessWidget {
         tx.type == 'transfer' && tx.toWalletId == currentWalletId;
     final title = tx.type == 'transfer'
         ? (isTransferIn
-              ? 'Transfer dari ${detail.wallet.name}'
-              : 'Transfer ke ${detail.toWallet?.name ?? "-"}')
+              ? 'Transfer dari ${detail.wallet.name}${detail.toPocketName != null ? ' → ${detail.toPocketName}' : ''}'
+              : 'Transfer ke ${detail.toWallet?.name ?? "-"}${detail.toPocketName != null ? ' (${detail.toPocketName})' : ''}')
         : (tx.itemName ?? detail.category?.name ?? 'Transaksi');
+
+    final pocketTag = tx.type != 'transfer' && detail.pocketName != null
+        ? ' • Pos ${detail.pocketName}'
+        : '';
 
     return ListTile(
       leading: CategoryIconBadge(
@@ -295,7 +640,7 @@ class _WalletTxRow extends StatelessWidget {
         iconSize: 20,
       ),
       title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(AppDateUtils.formatDayDate(date)),
+      subtitle: Text('${AppDateUtils.formatDayDate(date)}$pocketTag'),
       trailing: AmountText(
         amount: tx.amount,
         type: tx.type == 'transfer'

@@ -69,6 +69,8 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
   int? _categoryId;
   int? _walletId;
   int? _toWalletId;
+  int? _pocketId;
+  int? _toPocketId;
   late DateTime _occurredAt;
   bool _showNoteField = false;
   bool _showKeypad = true;
@@ -92,6 +94,8 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _categoryId = tx.categoryId;
       _walletId = tx.walletId;
       _toWalletId = tx.toWalletId;
+      _pocketId = tx.pocketId;
+      _toPocketId = tx.toPocketId;
       _occurredAt = DateTime.fromMillisecondsSinceEpoch(tx.occurredAt)
           .toLocal();
       _showNoteField = tx.note.isNotEmpty;
@@ -106,6 +110,8 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _categoryId = tx.categoryId;
       _walletId = tx.walletId;
       _toWalletId = tx.toWalletId;
+      _pocketId = tx.pocketId;
+      _toPocketId = tx.toPocketId;
       _occurredAt = DateTime.now();
       _showNoteField = tx.note.isNotEmpty;
       _showKeypad = false;
@@ -117,6 +123,7 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _noteCtrl.text = item.lastNote;
       _categoryId = item.lastCategoryId;
       _walletId = item.lastWalletId;
+      _pocketId = item.lastPocketId;
       _occurredAt = DateTime.now();
       _showNoteField = item.lastNote.isNotEmpty;
       _showKeypad = false;
@@ -181,6 +188,7 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _rawAmount = item.lastAmount.toString();
       if (item.lastCategoryId != null) _categoryId = item.lastCategoryId;
       if (item.lastWalletId != null) _walletId = item.lastWalletId;
+      _pocketId = item.lastPocketId;
       _noteCtrl.text = item.lastNote;
       if (item.lastNote.isNotEmpty) _showNoteField = true;
       _suggestions = [];
@@ -208,6 +216,8 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _categoryId = tx.categoryId;
       _walletId = tx.walletId;
       _toWalletId = tx.toWalletId;
+      _pocketId = tx.pocketId;
+      _toPocketId = tx.toPocketId;
       _occurredAt = DateTime.now();
       _showNoteField = tx.note.isNotEmpty;
       _showKeypad = false;
@@ -305,12 +315,35 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       return;
     }
     if (_type == 'transfer') {
-      if (_toWalletId == null || _toWalletId == _walletId) {
+      if (_toWalletId == null) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Pilih dompet tujuan yang berbeda untuk transfer'),
-          ),
+          const SnackBar(content: Text('Pilih dompet tujuan untuk transfer')),
         );
+        return;
+      }
+      if (_toWalletId == _walletId) {
+        if (widget.existing != null || _pocketId == _toPocketId) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Pilih dompet tujuan berbeda, atau pilih pos budget asal & tujuan yang berbeda di saku yang sama',
+              ),
+            ),
+          );
+          return;
+        }
+        setState(() => _saving = true);
+        await ref
+            .read(walletActionsProvider)
+            .allocateOrMovePocket(
+              walletId: _walletId!,
+              fromPocketId: _pocketId,
+              toPocketId: _toPocketId,
+              amount: amount,
+              note: _noteCtrl.text.trim(),
+            );
+        AppHaptics.medium(ref.read(settingsProvider).hapticsEnabled);
+        if (mounted) Navigator.of(context).pop(true);
         return;
       }
     }
@@ -329,6 +362,8 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
           walletId: _walletId!,
           categoryId: _type == 'transfer' ? null : _categoryId,
           toWalletId: _type == 'transfer' ? _toWalletId : null,
+          pocketId: _pocketId,
+          toPocketId: _type == 'transfer' ? _toPocketId : null,
           fee: fee,
           note: _noteCtrl.text.trim(),
           itemName: _type == 'transfer' ? null : _itemCtrl.text.trim(),
@@ -343,6 +378,8 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
   Widget build(BuildContext context) {
     final wallets =
         ref.watch(walletsWithBalancesProvider).valueOrNull ?? const [];
+    final allPockets =
+        ref.watch(allActivePocketsProvider).valueOrNull ?? const [];
     final haptics = ref.watch(settingsProvider.select((s) => s.hapticsEnabled));
 
     if (_walletId == null && wallets.isNotEmpty) {
@@ -352,16 +389,31 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
         !wallets.any((w) => w.wallet.id == _walletId)) {
       _walletId = wallets.first.wallet.id;
     }
-    if (_type == 'transfer' && wallets.length >= 2) {
-      if (_toWalletId == null || _toWalletId == _walletId) {
-        _toWalletId = wallets
-            .firstWhere(
-              (w) => w.wallet.id != _walletId,
-              orElse: () => wallets.last,
-            )
-            .wallet
-            .id;
-      }
+    if (_type == 'transfer' && wallets.isNotEmpty) {
+      _toWalletId ??= wallets.length >= 2
+          ? wallets
+                .firstWhere(
+                  (w) => w.wallet.id != _walletId,
+                  orElse: () => wallets.last,
+                )
+                .wallet
+                .id
+          : wallets.first.wallet.id;
+    }
+
+    final walletPockets = allPockets
+        .where((p) => p.pocket.walletId == _walletId)
+        .toList();
+    final toWalletPockets = allPockets
+        .where((p) => p.pocket.walletId == _toWalletId)
+        .toList();
+    if (_pocketId != null &&
+        !walletPockets.any((p) => p.pocket.id == _pocketId)) {
+      _pocketId = null;
+    }
+    if (_toPocketId != null &&
+        !toWalletPockets.any((p) => p.pocket.id == _toPocketId)) {
+      _toPocketId = null;
     }
 
     final cs = Theme.of(context).colorScheme;
@@ -692,11 +744,49 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                           selected: _walletId == wb.wallet.id,
                           onSelected: (_) {
                             AppHaptics.selection(haptics);
-                            setState(() => _walletId = wb.wallet.id);
+                            setState(() {
+                              _walletId = wb.wallet.id;
+                              _pocketId = null;
+                            });
                           },
                         ),
                     ],
                   ),
+                  if (walletPockets.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Text('Pos Budget Saku (opsional)', style: tt.labelMedium),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ChoiceChip(
+                          label: const Text('Saldo Bebas'),
+                          selected: _pocketId == null,
+                          onSelected: (_) {
+                            AppHaptics.selection(haptics);
+                            setState(() => _pocketId = null);
+                          },
+                        ),
+                        for (final p in walletPockets)
+                          ChoiceChip(
+                            avatar: Icon(
+                              AppIcons.fromKey(p.pocket.icon),
+                              size: 16,
+                              color: Color(p.pocket.color),
+                            ),
+                            label: Text(
+                              '${p.pocket.name} (${CurrencyFormatter.formatCompact(p.balance)})',
+                            ),
+                            selected: _pocketId == p.pocket.id,
+                            onSelected: (_) {
+                              AppHaptics.selection(haptics);
+                              setState(() => _pocketId = p.pocket.id);
+                            },
+                          ),
+                      ],
+                    ),
+                  ],
                 ] else ...[
                   Text('Dari Dompet', style: tt.labelMedium),
                   const SizedBox(height: 8),
@@ -710,11 +800,37 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                           selected: _walletId == wb.wallet.id,
                           onSelected: (_) {
                             AppHaptics.selection(haptics);
-                            setState(() => _walletId = wb.wallet.id);
+                            setState(() {
+                              _walletId = wb.wallet.id;
+                              _pocketId = null;
+                            });
                           },
                         ),
                     ],
                   ),
+                  if (walletPockets.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text('Dari Pos Budget', style: tt.labelSmall),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        ChoiceChip(
+                          label: const Text('Saldo Bebas'),
+                          selected: _pocketId == null,
+                          onSelected: (_) => setState(() => _pocketId = null),
+                        ),
+                        for (final p in walletPockets)
+                          ChoiceChip(
+                            label: Text(p.pocket.name),
+                            selected: _pocketId == p.pocket.id,
+                            onSelected: (_) =>
+                                setState(() => _pocketId = p.pocket.id),
+                          ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Text('Ke Dompet', style: tt.labelMedium),
                   const SizedBox(height: 8),
@@ -726,24 +842,50 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                         ChoiceChip(
                           label: Text(wb.wallet.name),
                           selected: _toWalletId == wb.wallet.id,
-                          onSelected: wb.wallet.id == _walletId
-                              ? null
-                              : (_) {
-                                  AppHaptics.selection(haptics);
-                                  setState(() => _toWalletId = wb.wallet.id);
-                                },
+                          onSelected: (_) {
+                            AppHaptics.selection(haptics);
+                            setState(() {
+                              _toWalletId = wb.wallet.id;
+                              _toPocketId = null;
+                            });
+                          },
                         ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _feeCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Biaya admin transfer (opsional)',
-                      prefixText: 'Rp ',
-                      hintText: '0 (mis. 2500 atau 6,5k)',
+                  if (toWalletPockets.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text('Ke Pos Budget', style: tt.labelSmall),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: [
+                        ChoiceChip(
+                          label: const Text('Saldo Bebas'),
+                          selected: _toPocketId == null,
+                          onSelected: (_) => setState(() => _toPocketId = null),
+                        ),
+                        for (final p in toWalletPockets)
+                          ChoiceChip(
+                            label: Text(p.pocket.name),
+                            selected: _toPocketId == p.pocket.id,
+                            onSelected: (_) =>
+                                setState(() => _toPocketId = p.pocket.id),
+                          ),
+                      ],
                     ),
-                  ),
+                  ],
+                  if (_toWalletId != _walletId) ...[
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _feeCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Biaya admin transfer (opsional)',
+                        prefixText: 'Rp ',
+                        hintText: '0 (mis. 2500 atau 6,5k)',
+                      ),
+                    ),
+                  ],
                 ],
                 const SizedBox(height: 14),
 

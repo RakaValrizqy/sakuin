@@ -35,9 +35,40 @@ class Categories extends Table {
   BoolColumn get isArchived => boolean().withDefault(const Constant(false))();
 }
 
+@TableIndex(name: 'idx_wallet_pockets_wallet_id', columns: {#walletId})
+class WalletPockets extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get walletId => integer().references(Wallets, #id)();
+  TextColumn get name => text()();
+  TextColumn get icon => text()();
+  IntColumn get color => integer()();
+  IntColumn get targetAmount => integer().nullable()();
+  IntColumn get sortOrder => integer().withDefault(const Constant(0))();
+  BoolColumn get isArchived => boolean().withDefault(const Constant(false))();
+}
+
+@TableIndex(name: 'idx_pocket_alloc_wallet_id', columns: {#walletId})
+@TableIndex(name: 'idx_pocket_alloc_from', columns: {#fromPocketId})
+@TableIndex(name: 'idx_pocket_alloc_to', columns: {#toPocketId})
+class PocketAllocations extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get walletId => integer().references(Wallets, #id)();
+  @ReferenceName('outgoingAllocations')
+  IntColumn get fromPocketId =>
+      integer().nullable().references(WalletPockets, #id)();
+  @ReferenceName('incomingAllocations')
+  IntColumn get toPocketId =>
+      integer().nullable().references(WalletPockets, #id)();
+  IntColumn get amount => integer()();
+  TextColumn get note => text().withDefault(const Constant(''))();
+  IntColumn get createdAt => integer()();
+}
+
 @TableIndex(name: 'idx_tx_day_key', columns: {#dayKey})
 @TableIndex(name: 'idx_tx_wallet_id', columns: {#walletId})
 @TableIndex(name: 'idx_tx_to_wallet_id', columns: {#toWalletId})
+@TableIndex(name: 'idx_tx_pocket_id', columns: {#pocketId})
+@TableIndex(name: 'idx_tx_to_pocket_id', columns: {#toPocketId})
 @TableIndex(name: 'idx_tx_category_id', columns: {#categoryId})
 @TableIndex(name: 'idx_tx_type_day_key', columns: {#type, #dayKey})
 @TableIndex(name: 'idx_tx_occurred_at', columns: {#occurredAt})
@@ -51,6 +82,12 @@ class Transactions extends Table {
   IntColumn get walletId => integer().references(Wallets, #id)();
   @ReferenceName('incomingTransactions')
   IntColumn get toWalletId => integer().nullable().references(Wallets, #id)();
+  @ReferenceName('pocketTransactions')
+  IntColumn get pocketId =>
+      integer().nullable().references(WalletPockets, #id)();
+  @ReferenceName('incomingPocketTransactions')
+  IntColumn get toPocketId =>
+      integer().nullable().references(WalletPockets, #id)();
   IntColumn get fee => integer().withDefault(const Constant(0))();
   TextColumn get note => text().withDefault(const Constant(''))();
   TextColumn get itemName => text().nullable()();
@@ -73,6 +110,8 @@ class ItemMemory extends Table {
   IntColumn get lastCategoryId =>
       integer().nullable().references(Categories, #id)();
   IntColumn get lastWalletId => integer().nullable().references(Wallets, #id)();
+  IntColumn get lastPocketId =>
+      integer().nullable().references(WalletPockets, #id)();
   TextColumn get lastNote => text().withDefault(const Constant(''))();
   IntColumn get useCount => integer().withDefault(const Constant(1))();
   IntColumn get lastUsedAt => integer()();
@@ -151,18 +190,35 @@ class WalletWithBalance {
   final int balance;
 }
 
+class PocketWithBalance {
+  const PocketWithBalance({required this.pocket, required this.balance});
+
+  final WalletPocket pocket;
+  final int balance;
+
+  double? get targetProgress {
+    final target = pocket.targetAmount;
+    if (target == null || target <= 0) return null;
+    return (balance / target).clamp(0.0, 1.0);
+  }
+}
+
 class TransactionDetail {
   const TransactionDetail({
     required this.transaction,
     required this.wallet,
     this.toWallet,
     this.category,
+    this.pocketName,
+    this.toPocketName,
   });
 
   final Transaction transaction;
   final Wallet wallet;
   final Wallet? toWallet;
   final Category? category;
+  final String? pocketName;
+  final String? toPocketName;
 }
 
 class PeriodSummary {
@@ -251,6 +307,8 @@ class PersonDebtSummary {
 @DriftDatabase(
   tables: [
     Wallets,
+    WalletPockets,
+    PocketAllocations,
     Categories,
     Transactions,
     ItemMemory,
@@ -268,7 +326,7 @@ class AppDatabase extends _$AppDatabase {
   /// dan tambahkan langkah migrasi non-destruktif di [migration.onUpgrade]
   /// agar update APK tanpa uninstall tetap mempertahankan seluruh data pengguna.
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -277,8 +335,32 @@ class AppDatabase extends _$AppDatabase {
       await _seedDefaultCategories();
     },
     onUpgrade: (m, from, to) async {
-      // Migrasi bertahap non-destruktif untuk versi mendatang (contoh: if (from < 2) ...)
-      // Jangan pernah drop tabel pengguna saat upgrade.
+      // Migrasi bertahap non-destruktif — JANGAN pernah drop tabel pengguna.
+      if (from < 2) {
+        await m.createTable(walletPockets);
+        await m.createTable(pocketAllocations);
+        await m.addColumn(transactions, transactions.pocketId);
+        await m.addColumn(transactions, transactions.toPocketId);
+        await m.addColumn(itemMemory, itemMemory.lastPocketId);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_wallet_pockets_wallet_id ON wallet_pockets (wallet_id)',
+        );
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_pocket_alloc_wallet_id ON pocket_allocations (wallet_id)',
+        );
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_pocket_alloc_from ON pocket_allocations (from_pocket_id)',
+        );
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_pocket_alloc_to ON pocket_allocations (to_pocket_id)',
+        );
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_tx_pocket_id ON transactions (pocket_id)',
+        );
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_tx_to_pocket_id ON transactions (to_pocket_id)',
+        );
+      }
     },
     beforeOpen: (details) async {
       await customStatement('PRAGMA foreign_keys = ON');
@@ -418,6 +500,199 @@ FROM wallets w
   }
 
   // -------------------------------------------------------------------------
+  // Wallet Pockets / Pos Budget di dalam Saku (SQL-aggregated balances)
+  // -------------------------------------------------------------------------
+
+  static const String _pocketBalanceSql = '''
+SELECT
+  p.id,
+  p.wallet_id,
+  p.name,
+  p.icon,
+  p.color,
+  p.target_amount,
+  p.sort_order,
+  p.is_archived,
+  COALESCE((SELECT SUM(pa.amount) FROM pocket_allocations pa WHERE pa.to_pocket_id = p.id), 0)
+  - COALESCE((SELECT SUM(pa.amount) FROM pocket_allocations pa WHERE pa.from_pocket_id = p.id), 0)
+  + COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.pocket_id = p.id AND t.type = 'income'), 0)
+  - COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.pocket_id = p.id AND t.type = 'expense'), 0)
+  - COALESCE((SELECT SUM(t.amount + t.fee) FROM transactions t WHERE t.pocket_id = p.id AND t.type = 'transfer'), 0)
+  + COALESCE((SELECT SUM(t.amount) FROM transactions t WHERE t.to_pocket_id = p.id AND t.type = 'transfer'), 0)
+  AS balance
+FROM wallet_pockets p
+''';
+
+  PocketWithBalance _mapPocketBalanceRow(QueryRow r) {
+    final pocket = WalletPocket(
+      id: r.read<int>('id'),
+      walletId: r.read<int>('wallet_id'),
+      name: r.read<String>('name'),
+      icon: r.read<String>('icon'),
+      color: r.read<int>('color'),
+      targetAmount: r.readNullable<int>('target_amount'),
+      sortOrder: r.read<int>('sort_order'),
+      isArchived: r.read<bool>('is_archived'),
+    );
+    return PocketWithBalance(pocket: pocket, balance: r.read<int>('balance'));
+  }
+
+  Stream<List<PocketWithBalance>> watchPocketsForWallet(
+    int walletId, {
+    bool includeArchived = false,
+  }) {
+    final archSql = includeArchived ? '' : 'AND p.is_archived = 0';
+    return customSelect(
+      '$_pocketBalanceSql WHERE p.wallet_id = ? $archSql ORDER BY p.sort_order ASC, p.id ASC',
+      variables: [Variable.withInt(walletId)],
+      readsFrom: {walletPockets, pocketAllocations, transactions},
+    ).watch().map((rows) => rows.map(_mapPocketBalanceRow).toList());
+  }
+
+  Stream<List<PocketWithBalance>> watchAllActivePockets() {
+    return customSelect(
+      '$_pocketBalanceSql WHERE p.is_archived = 0 ORDER BY p.wallet_id ASC, p.sort_order ASC, p.id ASC',
+      readsFrom: {walletPockets, pocketAllocations, transactions},
+    ).watch().map((rows) => rows.map(_mapPocketBalanceRow).toList());
+  }
+
+  Future<List<PocketWithBalance>> getPocketsForWallet(
+    int walletId, {
+    bool includeArchived = false,
+  }) async {
+    final archSql = includeArchived ? '' : 'AND p.is_archived = 0';
+    final rows = await customSelect(
+      '$_pocketBalanceSql WHERE p.wallet_id = ? $archSql ORDER BY p.sort_order ASC, p.id ASC',
+      variables: [Variable.withInt(walletId)],
+    ).get();
+    return rows.map(_mapPocketBalanceRow).toList();
+  }
+
+  Future<int> getWalletUnallocatedBalance(int walletId) async {
+    final wb = await getWalletWithBalance(walletId);
+    if (wb == null) return 0;
+    final pockets = await getPocketsForWallet(walletId, includeArchived: true);
+    var allocated = 0;
+    for (final p in pockets) {
+      allocated += p.balance;
+    }
+    return wb.balance - allocated;
+  }
+
+  /// Alokasi manual (dari Saldo Bebas ke Pos, atau tarik kembali ke Saldo Bebas)
+  /// maupun transfer antar Pos di dalam saku yang sama.
+  Future<int> allocateOrMovePocket({
+    required int walletId,
+    int? fromPocketId,
+    int? toPocketId,
+    required int amount,
+    String note = '',
+  }) async {
+    if (amount <= 0 || fromPocketId == toPocketId) {
+      throw ArgumentError('Nominal harus > 0 dan asal/tujuan harus berbeda');
+    }
+    return into(pocketAllocations).insert(
+      PocketAllocationsCompanion.insert(
+        walletId: walletId,
+        fromPocketId: Value(fromPocketId),
+        toPocketId: Value(toPocketId),
+        amount: amount,
+        note: Value(note.trim()),
+        createdAt: DateTime.now().toUtc().millisecondsSinceEpoch,
+      ),
+    );
+  }
+
+  /// Atur saldo Pos secara manual langsung ke angka target (selisihnya diambil/dikembalikan ke Saldo Bebas).
+  Future<void> setPocketBalanceManually({
+    required int walletId,
+    required int pocketId,
+    required int targetBalance,
+    String note = 'Alokasi manual',
+  }) async {
+    final pockets = await getPocketsForWallet(walletId, includeArchived: true);
+    final current =
+        pockets.where((p) => p.pocket.id == pocketId).firstOrNull?.balance ?? 0;
+    final diff = targetBalance - current;
+    if (diff == 0) return;
+    if (diff > 0) {
+      await allocateOrMovePocket(
+        walletId: walletId,
+        fromPocketId: null,
+        toPocketId: pocketId,
+        amount: diff,
+        note: note,
+      );
+    } else {
+      await allocateOrMovePocket(
+        walletId: walletId,
+        fromPocketId: pocketId,
+        toPocketId: null,
+        amount: diff.abs(),
+        note: note,
+      );
+    }
+  }
+
+  /// Kembalikan saldo tersisa ke Saldo Bebas lalu hapus jika belum dipakai transaksi, atau arsipkan.
+  Future<bool> deleteOrArchivePocket(int walletId, int pocketId) async {
+    return transaction(() async {
+      final pockets = await getPocketsForWallet(
+        walletId,
+        includeArchived: true,
+      );
+      final current =
+          pockets.where((p) => p.pocket.id == pocketId).firstOrNull?.balance ??
+          0;
+      if (current != 0) {
+        await allocateOrMovePocket(
+          walletId: walletId,
+          fromPocketId: current > 0 ? pocketId : null,
+          toPocketId: current > 0 ? null : pocketId,
+          amount: current.abs(),
+          note: 'Pengembalian saldo pos',
+        );
+      }
+
+      final txRefRow = await customSelect(
+        'SELECT COUNT(*) AS cnt FROM transactions WHERE pocket_id = ? OR to_pocket_id = ?',
+        variables: [Variable.withInt(pocketId), Variable.withInt(pocketId)],
+      ).getSingle();
+      final txRefs = txRefRow.read<int>('cnt');
+
+      if (txRefs == 0) {
+        await (delete(pocketAllocations)..where(
+              (pa) =>
+                  pa.fromPocketId.equals(pocketId) |
+                  pa.toPocketId.equals(pocketId),
+            ))
+            .go();
+        await (update(itemMemory)
+              ..where((m) => m.lastPocketId.equals(pocketId)))
+            .write(const ItemMemoryCompanion(lastPocketId: Value(null)));
+        await (delete(walletPockets)..where((p) => p.id.equals(pocketId))).go();
+        return true;
+      }
+
+      await (update(walletPockets)..where((p) => p.id.equals(pocketId))).write(
+        const WalletPocketsCompanion(isArchived: Value(true)),
+      );
+      return false;
+    });
+  }
+
+  Stream<List<PocketAllocation>> watchRecentPocketAllocations(
+    int walletId, {
+    int limit = 20,
+  }) {
+    final q = select(pocketAllocations)
+      ..where((pa) => pa.walletId.equals(walletId))
+      ..orderBy([(pa) => OrderingTerm.desc(pa.createdAt)])
+      ..limit(limit);
+    return q.watch();
+  }
+
+  // -------------------------------------------------------------------------
   // Categories (ordered by recent usage or sort_order)
   // -------------------------------------------------------------------------
 
@@ -489,6 +764,8 @@ FROM wallets w
     required int walletId,
     int? categoryId,
     int? toWalletId,
+    int? pocketId,
+    int? toPocketId,
     int fee = 0,
     String note = '',
     String? itemName,
@@ -516,6 +793,8 @@ FROM wallets w
             categoryId: Value(categoryId),
             walletId: Value(walletId),
             toWalletId: Value(toWalletId),
+            pocketId: Value(pocketId),
+            toPocketId: Value(toPocketId),
             fee: Value(fee),
             note: Value(note.trim()),
             itemName: Value(cleanItem),
@@ -533,6 +812,8 @@ FROM wallets w
             categoryId: Value(categoryId),
             walletId: walletId,
             toWalletId: Value(toWalletId),
+            pocketId: Value(pocketId),
+            toPocketId: Value(toPocketId),
             fee: Value(fee),
             note: Value(note.trim()),
             itemName: Value(cleanItem),
@@ -553,6 +834,7 @@ FROM wallets w
           amount: amount,
           categoryId: categoryId,
           walletId: walletId,
+          pocketId: pocketId,
           note: note.trim(),
         );
       }
@@ -571,6 +853,8 @@ FROM wallets w
         categoryId: Value(tx.categoryId),
         walletId: Value(tx.walletId),
         toWalletId: Value(tx.toWalletId),
+        pocketId: Value(tx.pocketId),
+        toPocketId: Value(tx.toPocketId),
         fee: Value(tx.fee),
         note: Value(tx.note),
         itemName: Value(tx.itemName),
@@ -654,7 +938,8 @@ FROM wallets w
     final rows = await customSelect('''
       SELECT
         t.id AS t_id, t.type AS t_type, t.amount AS t_amount, t.category_id AS t_category_id,
-        t.wallet_id AS t_wallet_id, t.to_wallet_id AS t_to_wallet_id, t.fee AS t_fee,
+        t.wallet_id AS t_wallet_id, t.to_wallet_id AS t_to_wallet_id,
+        t.pocket_id AS t_pocket_id, t.to_pocket_id AS t_to_pocket_id, t.fee AS t_fee,
         t.note AS t_note, t.item_name AS t_item_name, t.occurred_at AS t_occurred_at,
         t.day_key AS t_day_key, t.created_at AS t_created_at, t.updated_at AS t_updated_at,
         w.id AS w_id, w.name AS w_name, w.type AS w_type, w.icon AS w_icon,
@@ -666,11 +951,15 @@ FROM wallets w
         tw.include_in_total AS tw_include_in_total, tw.is_archived AS tw_is_archived,
         tw.sort_order AS tw_sort_order,
         c.id AS c_id, c.name AS c_name, c.type AS c_type, c.icon AS c_icon,
-        c.color AS c_color, c.sort_order AS c_sort_order, c.is_archived AS c_is_archived
+        c.color AS c_color, c.sort_order AS c_sort_order, c.is_archived AS c_is_archived,
+        pk.name AS pk_name,
+        tpk.name AS tpk_name
       FROM transactions t
       INNER JOIN wallets w ON w.id = t.wallet_id
       LEFT JOIN wallets tw ON tw.id = t.to_wallet_id
       LEFT JOIN categories c ON c.id = t.category_id
+      LEFT JOIN wallet_pockets pk ON pk.id = t.pocket_id
+      LEFT JOIN wallet_pockets tpk ON tpk.id = t.to_pocket_id
       $whereSql
       ORDER BY t.occurred_at DESC, t.id DESC
       LIMIT ?
@@ -684,7 +973,8 @@ FROM wallets w
       '''
       SELECT
         t.id AS t_id, t.type AS t_type, t.amount AS t_amount, t.category_id AS t_category_id,
-        t.wallet_id AS t_wallet_id, t.to_wallet_id AS t_to_wallet_id, t.fee AS t_fee,
+        t.wallet_id AS t_wallet_id, t.to_wallet_id AS t_to_wallet_id,
+        t.pocket_id AS t_pocket_id, t.to_pocket_id AS t_to_pocket_id, t.fee AS t_fee,
         t.note AS t_note, t.item_name AS t_item_name, t.occurred_at AS t_occurred_at,
         t.day_key AS t_day_key, t.created_at AS t_created_at, t.updated_at AS t_updated_at,
         w.id AS w_id, w.name AS w_name, w.type AS w_type, w.icon AS w_icon,
@@ -696,16 +986,20 @@ FROM wallets w
         tw.include_in_total AS tw_include_in_total, tw.is_archived AS tw_is_archived,
         tw.sort_order AS tw_sort_order,
         c.id AS c_id, c.name AS c_name, c.type AS c_type, c.icon AS c_icon,
-        c.color AS c_color, c.sort_order AS c_sort_order, c.is_archived AS c_is_archived
+        c.color AS c_color, c.sort_order AS c_sort_order, c.is_archived AS c_is_archived,
+        pk.name AS pk_name,
+        tpk.name AS tpk_name
       FROM transactions t
       INNER JOIN wallets w ON w.id = t.wallet_id
       LEFT JOIN wallets tw ON tw.id = t.to_wallet_id
       LEFT JOIN categories c ON c.id = t.category_id
+      LEFT JOIN wallet_pockets pk ON pk.id = t.pocket_id
+      LEFT JOIN wallet_pockets tpk ON tpk.id = t.to_pocket_id
       ORDER BY t.occurred_at DESC, t.id DESC
       LIMIT ?
       ''',
       variables: [Variable.withInt(limit)],
-      readsFrom: {transactions, wallets, categories},
+      readsFrom: {transactions, wallets, categories, walletPockets},
     ).watch().map((rows) => rows.map(_mapTransactionDetailRow).toList());
   }
 
@@ -717,6 +1011,8 @@ FROM wallets w
       categoryId: r.readNullable<int>('t_category_id'),
       walletId: r.read<int>('t_wallet_id'),
       toWalletId: r.readNullable<int>('t_to_wallet_id'),
+      pocketId: r.readNullable<int>('t_pocket_id'),
+      toPocketId: r.readNullable<int>('t_to_pocket_id'),
       fee: r.read<int>('t_fee'),
       note: r.read<String>('t_note'),
       itemName: r.readNullable<String>('t_item_name'),
@@ -767,6 +1063,8 @@ FROM wallets w
       wallet: wallet,
       toWallet: toWallet,
       category: category,
+      pocketName: r.readNullable<String>('pk_name'),
+      toPocketName: r.readNullable<String>('tpk_name'),
     );
   }
 
@@ -780,6 +1078,7 @@ FROM wallets w
     required int amount,
     int? categoryId,
     int? walletId,
+    int? pocketId,
     String note = '',
     bool? isPinned,
   }) async {
@@ -799,6 +1098,7 @@ FROM wallets w
           lastAmount: Value(amount),
           lastCategoryId: Value(categoryId),
           lastWalletId: Value(walletId),
+          lastPocketId: Value(pocketId),
           lastNote: Value(note),
           useCount: Value(existing.useCount + 1),
           lastUsedAt: Value(nowMillis),
@@ -814,6 +1114,7 @@ FROM wallets w
           lastAmount: amount,
           lastCategoryId: Value(categoryId),
           lastWalletId: Value(walletId),
+          lastPocketId: Value(pocketId),
           lastNote: Value(note),
           useCount: const Value(1),
           lastUsedAt: nowMillis,

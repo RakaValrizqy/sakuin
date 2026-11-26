@@ -1,6 +1,6 @@
 # Sakuin
 
-Aplikasi pencatat keuangan Android **offline-first**, privat (tanpa server, tanpa iklan, tanpa akun, tanpa izin internet), super cepat, dan ringan.
+Aplikasi pencatat keuangan Android **offline-first**, privat (tanpa server, tanpa iklan, tanpa akun), super cepat, dan ringan. Seluruh data keuangan tersimpan 100% lokal di perangkat; koneksi internet hanya dipakai secara opsional untuk cek & unduh pembaruan resmi dari GitHub Releases.
 
 - **Application ID:** `id.rakavalrizqy.sakuin`
 - **Minimum Android:** Android 7.0 (API 24)
@@ -10,7 +10,8 @@ Aplikasi pencatat keuangan Android **offline-first**, privat (tanpa server, tanp
 ## Fitur Utama
 
 - **Input Super Cepat (1–2 ketukan):** Item Memory otomatis + autocomplete, Item Cepat di Beranda (dengan mode *Simpan Langsung* opsional), Duplikat transaksi, Smart Defaults, Keypad nominal kustom (`000`, `15k`, `1,5jt`, kalkulator `+ − × ÷`), dan Transaksi Berulang.
-- **Saku / Dompet:** Buat dompet sendiri (Tunai, Rekening Bank, E-Wallet, Lainnya), atur urutan, Transfer antar dompet (+ biaya admin opsional), Koreksi saldo, dan Detail dompet.
+- **Saku / Dompet + Pos Budget:** Buat dompet sendiri (Tunai, Rekening Bank, E-Wallet, Lainnya), bagi saldo dalam satu saku menjadi beberapa **Pos Budget** (mis. Uang Harian & Tabungan + Saldo Bebas), alokasi manual, pindah antar pos di saku yang sama, transfer lintas saku langsung ke pos tertentu (+ biaya admin opsional), koreksi saldo, dan detail dompet.
+- **Pembaruan Otomatis dari Aplikasi:** Cek rilis terbaru GitHub secara otomatis saat dibuka (bisa dimatikan di Pengaturan), tampilkan rangkuman perubahan dari `CHANGELOG.md`, unduh APK yang sesuai ABI perangkat langsung di aplikasi, lalu buka pemasang Android tanpa perlu uninstall.
 - **Pengeluaran & Pemasukan:** Pengelompokan per hari dengan subtotal, pencarian & filter lengkap, hapus dengan **Urungkan (Undo)**, warna semantik konsisten (**merah = pengeluaran, hijau = pemasukan**).
 - **Hutang-Piutang:** Kontak teman, dua arah (*Saya berutang* & *Mereka berutang*), cicilan parsial + progress bar, efek ke dompet opsional (tanpa merusak laporan arus kas), ringkasan per orang, pengingat jatuh tempo, dan bagikan pengingat penagihan via share sheet.
 - **Laporan & Anggaran:** Tanggal mulai periode kustom (1–28, mis. tanggal gajian), grafik `CustomPainter` ringan (Donut interaktif & Tren), perbandingan periode sebelumnya, anggaran bulanan total & per kategori dengan peringatan 80%/100% serta batas harian aman, ekspor **CSV** dan **PDF**.

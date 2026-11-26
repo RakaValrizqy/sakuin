@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sakuin/core/services/notification_service.dart';
 import 'package:sakuin/core/services/security_service.dart';
 import 'package:sakuin/core/services/settings_service.dart';
+import 'package:sakuin/core/services/update_service.dart';
 import 'package:sakuin/features/settings/pin_lock_screen.dart';
+import 'package:sakuin/features/settings/update_sheet.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -327,6 +329,68 @@ class SettingsScreen extends ConsumerWidget {
                     await ref
                         .read(securityServiceProvider)
                         .setSecureScreenFlag(v);
+                  },
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 16),
+          const _SectionTitle('Pembaruan Aplikasi'),
+          Card(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  secondary: const Icon(Icons.system_update_rounded),
+                  title: const Text('Cek pembaruan otomatis'),
+                  subtitle: const Text(
+                    'Periksa rilis terbaru dari GitHub saat Sakuin dibuka (data keuangan tetap 100% lokal)',
+                  ),
+                  value: settings.autoCheckUpdate,
+                  onChanged: notifier.setAutoCheckUpdate,
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.refresh_rounded),
+                  title: const Text('Cek Pembaruan Sekarang'),
+                  subtitle: const Text(
+                    'Unduh & pasang versi terbaru langsung dari aplikasi',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () async {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Memeriksa pembaruan dari GitHub...'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                    final result = await ref
+                        .read(updateServiceProvider)
+                        .checkForUpdate();
+                    if (!context.mounted) return;
+                    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                    if (result.errorMessage != null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(result.errorMessage!)),
+                      );
+                      return;
+                    }
+                    if (result.availableUpdate != null) {
+                      await showUpdateAvailableSheet(
+                        context,
+                        currentVersion: result.currentVersion,
+                        update: result.availableUpdate!,
+                        allowSkip: false,
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Sakuin v${result.currentVersion} sudah versi terbaru',
+                          ),
+                        ),
+                      );
+                    }
                   },
                 ),
               ],

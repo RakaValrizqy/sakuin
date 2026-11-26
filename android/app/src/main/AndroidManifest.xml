@@ -1,5 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Tidak meminta izin INTERNET: aplikasi 100% offline-first dan privat -->
+    <!-- Izin INTERNET hanya dipakai untuk cek & unduh pembaruan resmi dari GitHub Releases.
+         Seluruh data keuangan tetap 100% tersimpan lokal (offline-first). -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
@@ -28,6 +31,17 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- FileProvider khusus untuk memasang APK pembaruan dari cache aplikasi -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.update_fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/update_file_paths" />
+        </provider>
 
         <!-- Receiver untuk menjadwal ulang pengingat lokal setelah restart perangkat -->
         <receiver

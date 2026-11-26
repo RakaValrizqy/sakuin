@@ -20,6 +20,8 @@ class AppSettings {
     this.autoLockSeconds = 0, // 0 = langsung, 60 = 1 menit, 300 = 5 menit
     this.lastWalletId,
     this.onboardingCompleted = false,
+    this.autoCheckUpdate = true,
+    this.skippedUpdateTag,
   });
 
   final int periodStartDay;
@@ -38,6 +40,8 @@ class AppSettings {
   final int autoLockSeconds;
   final int? lastWalletId;
   final bool onboardingCompleted;
+  final bool autoCheckUpdate;
+  final String? skippedUpdateTag;
 
   AppSettings copyWith({
     int? periodStartDay,
@@ -58,6 +62,9 @@ class AppSettings {
     int? lastWalletId,
     bool clearLastWallet = false,
     bool? onboardingCompleted,
+    bool? autoCheckUpdate,
+    String? skippedUpdateTag,
+    bool clearSkippedUpdateTag = false,
   }) {
     return AppSettings(
       periodStartDay: periodStartDay ?? this.periodStartDay,
@@ -81,13 +88,17 @@ class AppSettings {
           ? null
           : (lastWalletId ?? this.lastWalletId),
       onboardingCompleted: onboardingCompleted ?? this.onboardingCompleted,
+      autoCheckUpdate: autoCheckUpdate ?? this.autoCheckUpdate,
+      skippedUpdateTag: clearSkippedUpdateTag
+          ? null
+          : (skippedUpdateTag ?? this.skippedUpdateTag),
     );
   }
 }
 
 class SettingsNotifier extends StateNotifier<AppSettings> {
   SettingsNotifier() : super(const AppSettings()) {
-    _load();
+    _loadFuture = _load();
   }
 
   static const _kPeriodStartDay = 'period_start_day';
@@ -106,10 +117,18 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
   static const _kAutoLockSeconds = 'auto_lock_seconds';
   static const _kLastWalletId = 'last_wallet_id';
   static const _kOnboardingCompleted = 'onboarding_completed';
+  static const _kAutoCheckUpdate = 'auto_check_update';
+  static const _kSkippedUpdateTag = 'skipped_update_tag';
 
   SharedPreferences? _prefs;
+  late final Future<void> _loadFuture;
   bool _loaded = false;
   bool get isLoaded => _loaded;
+
+  Future<AppSettings> ensureLoaded() async {
+    await _loadFuture;
+    return state;
+  }
 
   Future<SharedPreferences> _getPrefs() async =>
       _prefs ??= await SharedPreferences.getInstance();
@@ -139,6 +158,8 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
       autoLockSeconds: prefs.getInt(_kAutoLockSeconds) ?? 0,
       lastWalletId: prefs.getInt(_kLastWalletId),
       onboardingCompleted: prefs.getBool(_kOnboardingCompleted) ?? false,
+      autoCheckUpdate: prefs.getBool(_kAutoCheckUpdate) ?? true,
+      skippedUpdateTag: prefs.getString(_kSkippedUpdateTag),
     );
     _loaded = true;
   }
@@ -244,6 +265,26 @@ class SettingsNotifier extends StateNotifier<AppSettings> {
     state = state.copyWith(onboardingCompleted: v);
     final prefs = await _getPrefs();
     await prefs.setBool(_kOnboardingCompleted, v);
+  }
+
+  Future<void> setAutoCheckUpdate(bool v) async {
+    state = state.copyWith(autoCheckUpdate: v);
+    final prefs = await _getPrefs();
+    await prefs.setBool(_kAutoCheckUpdate, v);
+  }
+
+  Future<void> setSkippedUpdateTag(String? tag) async {
+    if (tag == null) {
+      state = state.copyWith(clearSkippedUpdateTag: true);
+    } else {
+      state = state.copyWith(skippedUpdateTag: tag);
+    }
+    final prefs = await _getPrefs();
+    if (tag == null) {
+      await prefs.remove(_kSkippedUpdateTag);
+    } else {
+      await prefs.setString(_kSkippedUpdateTag, tag);
+    }
   }
 }
 

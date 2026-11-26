@@ -36,11 +36,13 @@ class BackupPreview {
 class BackupService {
   BackupService(this._db);
 
-  static const int currentBackupVersion = 1;
+  static const int currentBackupVersion = 2;
   final AppDatabase _db;
 
   Future<String> buildJsonBackup() async {
     final wallets = await _db.select(_db.wallets).get();
+    final pockets = await _db.select(_db.walletPockets).get();
+    final pocketAllocations = await _db.select(_db.pocketAllocations).get();
     final categories = await _db.select(_db.categories).get();
     final transactions = await _db.select(_db.transactions).get();
     final itemMemory = await _db.select(_db.itemMemory).get();
@@ -57,6 +59,8 @@ class BackupService {
       'exported_at': DateTime.now().toUtc().toIso8601String(),
       'data': {
         'wallets': wallets.map((e) => e.toJson()).toList(),
+        'wallet_pockets': pockets.map((e) => e.toJson()).toList(),
+        'pocket_allocations': pocketAllocations.map((e) => e.toJson()).toList(),
         'categories': categories.map((e) => e.toJson()).toList(),
         'transactions': transactions.map((e) => e.toJson()).toList(),
         'item_memory': itemMemory.map((e) => e.toJson()).toList(),
@@ -180,6 +184,8 @@ class BackupService {
     }
 
     final walletRows = tableRows('wallets');
+    final pocketRows = tableRows('wallet_pockets');
+    final pocketAllocRows = tableRows('pocket_allocations');
     final categoryRows = tableRows('categories');
     final txRows = tableRows('transactions');
     final memoryRows = tableRows('item_memory');
@@ -198,6 +204,8 @@ class BackupService {
         await _db.delete(_db.recurringRules).go();
         await _db.delete(_db.itemMemory).go();
         await _db.delete(_db.transactions).go();
+        await _db.delete(_db.pocketAllocations).go();
+        await _db.delete(_db.walletPockets).go();
         await _db.delete(_db.categories).go();
         await _db.delete(_db.wallets).go();
 
@@ -206,6 +214,18 @@ class BackupService {
           await _db
               .into(_db.wallets)
               .insert(w, mode: InsertMode.insertOrReplace);
+        }
+        for (final row in pocketRows) {
+          final pk = WalletPocket.fromJson(row);
+          await _db
+              .into(_db.walletPockets)
+              .insert(pk, mode: InsertMode.insertOrReplace);
+        }
+        for (final row in pocketAllocRows) {
+          final pa = PocketAllocation.fromJson(row);
+          await _db
+              .into(_db.pocketAllocations)
+              .insert(pa, mode: InsertMode.insertOrReplace);
         }
         for (final row in categoryRows) {
           final c = Category.fromJson(row);
@@ -283,6 +303,63 @@ class BackupService {
           }
         }
 
+        final pocketIdMap = <int, int>{};
+        final existingPockets = await _db.select(_db.walletPockets).get();
+        for (final row in pocketRows) {
+          final pk = WalletPocket.fromJson(row);
+          final mappedWallet = walletIdMap[pk.walletId];
+          if (mappedWallet == null) continue;
+          final match = existingPockets
+              .where(
+                (e) =>
+                    e.walletId == mappedWallet &&
+                    e.name.toLowerCase() == pk.name.toLowerCase(),
+              )
+              .firstOrNull;
+          if (match != null) {
+            pocketIdMap[pk.id] = match.id;
+          } else {
+            final newId = await _db
+                .into(_db.walletPockets)
+                .insert(
+                  WalletPocketsCompanion.insert(
+                    walletId: mappedWallet,
+                    name: pk.name,
+                    icon: pk.icon,
+                    color: pk.color,
+                    targetAmount: Value(pk.targetAmount),
+                    sortOrder: Value(pk.sortOrder),
+                    isArchived: Value(pk.isArchived),
+                  ),
+                );
+            pocketIdMap[pk.id] = newId;
+          }
+        }
+
+        for (final row in pocketAllocRows) {
+          final pa = PocketAllocation.fromJson(row);
+          final mappedWallet = walletIdMap[pa.walletId];
+          if (mappedWallet == null) continue;
+          await _db
+              .into(_db.pocketAllocations)
+              .insert(
+                PocketAllocationsCompanion.insert(
+                  walletId: mappedWallet,
+                  fromPocketId: Value(
+                    pa.fromPocketId == null
+                        ? null
+                        : pocketIdMap[pa.fromPocketId],
+                  ),
+                  toPocketId: Value(
+                    pa.toPocketId == null ? null : pocketIdMap[pa.toPocketId],
+                  ),
+                  amount: pa.amount,
+                  note: Value(pa.note),
+                  createdAt: pa.createdAt,
+                ),
+              );
+        }
+
         final categoryIdMap = <int, int>{};
         final existingCats = await _db.select(_db.categories).get();
         for (final row in categoryRows) {
@@ -330,6 +407,12 @@ class BackupService {
                   toWalletId: Value(
                     t.toWalletId == null ? null : walletIdMap[t.toWalletId],
                   ),
+                  pocketId: Value(
+                    t.pocketId == null ? null : pocketIdMap[t.pocketId],
+                  ),
+                  toPocketId: Value(
+                    t.toPocketId == null ? null : pocketIdMap[t.toPocketId],
+                  ),
                   fee: Value(t.fee),
                   note: Value(t.note),
                   itemName: Value(t.itemName),
@@ -353,6 +436,9 @@ class BackupService {
             walletId: m.lastWalletId == null
                 ? null
                 : walletIdMap[m.lastWalletId],
+            pocketId: m.lastPocketId == null
+                ? null
+                : pocketIdMap[m.lastPocketId],
             note: m.lastNote,
             isPinned: m.isPinned,
           );

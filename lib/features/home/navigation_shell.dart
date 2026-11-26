@@ -3,11 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sakuin/core/services/notification_service.dart';
 import 'package:sakuin/core/services/security_service.dart';
 import 'package:sakuin/core/services/settings_service.dart';
+import 'package:sakuin/core/services/update_service.dart';
 import 'package:sakuin/core/utils/haptics.dart';
 import 'package:sakuin/features/home/home_screen.dart';
 import 'package:sakuin/features/recurring/recurring_service.dart';
 import 'package:sakuin/features/report/report_screen.dart';
 import 'package:sakuin/features/settings/more_screen.dart';
+import 'package:sakuin/features/settings/update_sheet.dart';
 import 'package:sakuin/features/transaction/transaction_form_sheet.dart';
 import 'package:sakuin/features/transaction/transaction_list_screen.dart';
 
@@ -34,12 +36,29 @@ class _NavigationShellState extends ConsumerState<NavigationShell> {
     if (_postFrameInitialized) return;
     _postFrameInitialized = true;
 
-    final settings = ref.read(settingsProvider);
+    final settings = await ref.read(settingsProvider.notifier).ensureLoaded();
     if (settings.secureScreen) {
       await ref.read(securityServiceProvider).setSecureScreenFlag(true);
     }
     await ref.read(notificationServiceProvider).init();
     await ref.read(recurringServiceProvider).processDueRules();
+
+    final updater = ref.read(updateServiceProvider);
+    await updater.cleanupOldApks();
+
+    if (settings.autoCheckUpdate) {
+      final result = await updater.checkForUpdate();
+      final update = result.availableUpdate;
+      if (mounted &&
+          update != null &&
+          update.tagName != settings.skippedUpdateTag) {
+        await showUpdateAvailableSheet(
+          context,
+          currentVersion: result.currentVersion,
+          update: update,
+        );
+      }
+    }
   }
 
   @override
