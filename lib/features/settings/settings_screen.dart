@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sakuin/core/services/notification_service.dart';
+import 'package:sakuin/core/services/receipt_scanner_service.dart';
 import 'package:sakuin/core/services/security_service.dart';
 import 'package:sakuin/core/services/settings_service.dart';
 import 'package:sakuin/core/services/update_service.dart';
@@ -29,6 +30,8 @@ class SettingsScreen extends ConsumerWidget {
     final notifier = ref.read(settingsProvider.notifier);
     final appVersion = ref.watch(appVersionInfoProvider).valueOrNull;
     final hasToken = ref.watch(hasGitHubTokenProvider).valueOrNull ?? false;
+    final hasGeminiKey =
+        ref.watch(hasGeminiApiKeyProvider).valueOrNull ?? false;
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
 
@@ -338,6 +341,22 @@ class SettingsScreen extends ConsumerWidget {
           ),
 
           const SizedBox(height: 16),
+          const _SectionTitle('Scan Struk & AI Vision (Opsional)'),
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.auto_awesome_outlined),
+              title: const Text('Gemini API Key (Mode AI Pintar)'),
+              subtitle: Text(
+                hasGeminiKey
+                    ? 'Terpasang — Scan struk memakai AI Vision + fallback OCR Offline'
+                    : 'Opsional — tanpa key, Scan Struk tetap jalan 100% offline (ML Kit)',
+              ),
+              trailing: const Icon(Icons.chevron_right_rounded),
+              onTap: () => _showGeminiApiKeyDialog(context, ref, hasGeminiKey),
+            ),
+          ),
+
+          const SizedBox(height: 16),
           const _SectionTitle('Pembaruan Aplikasi'),
           Card(
             child: Column(
@@ -354,12 +373,17 @@ class SettingsScreen extends ConsumerWidget {
                 const Divider(height: 1),
                 SwitchListTile(
                   secondary: const Icon(Icons.system_update_rounded),
-                  title: const Text('Cek pembaruan otomatis'),
+                  title: const Text('Cek pembaruan & notifikasi rilis baru'),
                   subtitle: const Text(
-                    'Periksa rilis terbaru dari GitHub saat Sakuin dibuka (data keuangan tetap 100% lokal)',
+                    'Cek saat aplikasi dibuka + notifikasi 1x/hari (hemat baterai, hanya saat ada internet & rilis baru)',
                   ),
                   value: settings.autoCheckUpdate,
-                  onChanged: notifier.setAutoCheckUpdate,
+                  onChanged: (v) async {
+                    await notifier.setAutoCheckUpdate(v);
+                    await ref
+                        .read(updateServiceProvider)
+                        .syncBackgroundUpdateWorker(enabled: v);
+                  },
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -495,8 +519,10 @@ class SettingsScreen extends ConsumerWidget {
     controller.dispose();
     if (saved == null) return;
     final service = ref.read(updateServiceProvider);
+    final autoCheck = ref.read(settingsProvider).autoCheckUpdate;
     if (saved == '__DELETE__') {
       await service.saveGitHubToken(null);
+      await service.syncBackgroundUpdateWorker(enabled: autoCheck);
       ref.invalidate(hasGitHubTokenProvider);
       if (context.mounted) {
         ScaffoldMessenger.of(
@@ -507,12 +533,97 @@ class SettingsScreen extends ConsumerWidget {
     }
     if (saved.isEmpty) return;
     await service.saveGitHubToken(saved);
+    await service.syncBackgroundUpdateWorker(enabled: autoCheck);
     ref.invalidate(hasGitHubTokenProvider);
     if (context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
             'Token GitHub disimpan terenkripsi. Silakan cek pembaruan.',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _showGeminiApiKeyDialog(
+    BuildContext context,
+    WidgetRef ref,
+    bool hasKey,
+  ) async {
+    final controller = TextEditingController();
+    final saved = await showDialog<String?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Gemini API Key (Opsional)'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Tanpa API key, Scan Struk tetap berjalan 100% offline dengan Google ML Kit.\n\n'
+                'Jika ingin hasil pecah item & deteksi diskon/PPN jauh lebih akurat:\n'
+                '1. Buka aistudio.google.com/apikey dengan akun Google.\n'
+                '2. Klik "Create API key" (gratis).\n'
+                '3. Salin API key lalu tempel di bawah (tersimpan terenkripsi lokal di HP).',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: hasKey
+                      ? 'Tempel API key baru untuk mengganti'
+                      : 'AIza...',
+                  hintText: 'AIza...',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          if (hasKey)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, '__DELETE__'),
+              child: const Text('Hapus Key'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (saved == null) return;
+    final svc = ref.read(receiptScannerServiceProvider);
+    if (saved == '__DELETE__') {
+      await svc.saveGeminiApiKey(null);
+      ref.invalidate(hasGeminiApiKeyProvider);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Gemini API Key dihapus (kembali ke mode 100% Offline)',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    if (saved.isEmpty) return;
+    await svc.saveGeminiApiKey(saved);
+    ref.invalidate(hasGeminiApiKeyProvider);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Gemini API Key tersimpan terenkripsi! Mode Hybrid aktif.',
           ),
         ),
       );

@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sakuin/core/services/notification_service.dart';
 import 'package:sakuin/core/services/qris_sync_service.dart';
+import 'package:sakuin/core/services/receipt_scanner_service.dart';
 import 'package:sakuin/core/services/security_service.dart';
 import 'package:sakuin/core/services/settings_service.dart';
 import 'package:sakuin/core/services/update_service.dart';
 import 'package:sakuin/core/utils/haptics.dart';
 import 'package:sakuin/features/home/home_screen.dart';
+import 'package:sakuin/features/receipt/receipt_scanner_screen.dart';
 import 'package:sakuin/features/recurring/recurring_service.dart';
 import 'package:sakuin/features/report/report_screen.dart';
 import 'package:sakuin/features/settings/more_screen.dart';
@@ -24,18 +28,43 @@ class NavigationShell extends ConsumerStatefulWidget {
 class _NavigationShellState extends ConsumerState<NavigationShell> {
   int _tabIndex = 0;
   bool _postFrameInitialized = false;
+  StreamSubscription<String>? _sharedImageSub;
 
   @override
   void initState() {
     super.initState();
     // Cold start <= 1 detik: jalankan inisialisasi notifikasi, FLAG_SECURE, recurring,
-    // QRIS Gmail sync, dan cek update secara lazy setelah frame pertama selesai dirender.
+    // QRIS Gmail sync, Share Intent gambar struk, dan cek update secara lazy setelah frame pertama.
     WidgetsBinding.instance.addPostFrameCallback((_) => _runPostFirstFrame());
+  }
+
+  @override
+  void dispose() {
+    _sharedImageSub?.cancel();
+    super.dispose();
+  }
+
+  void _openSharedReceiptImage(String path) {
+    if (!mounted || path.isEmpty) return;
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ReceiptScannerScreen(initialImagePath: path),
+      ),
+    );
   }
 
   Future<void> _runPostFirstFrame() async {
     if (_postFrameInitialized) return;
     _postFrameInitialized = true;
+
+    final receiptSvc = ref.read(receiptScannerServiceProvider);
+    _sharedImageSub = receiptSvc.sharedImageStream.listen(
+      _openSharedReceiptImage,
+    );
+    final pendingShared = await receiptSvc.consumePendingSharedImage();
+    if (pendingShared != null && pendingShared.isNotEmpty) {
+      _openSharedReceiptImage(pendingShared);
+    }
 
     final settings = await ref.read(settingsProvider.notifier).ensureLoaded();
     if (settings.secureScreen) {
@@ -46,6 +75,7 @@ class _NavigationShellState extends ConsumerState<NavigationShell> {
 
     final updater = ref.read(updateServiceProvider);
     await updater.cleanupOldApks();
+    await updater.syncBackgroundUpdateWorker(enabled: settings.autoCheckUpdate);
 
     final qrisSvc = ref.read(qrisSyncServiceProvider);
     final qrisCfg = await qrisSvc.loadConfig();

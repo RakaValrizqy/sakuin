@@ -12,6 +12,7 @@ import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/features/debt/debt_list_screen.dart';
 import 'package:sakuin/features/debt/debt_providers.dart';
 import 'package:sakuin/features/qris/qris_inbox_screen.dart';
+import 'package:sakuin/features/receipt/receipt_scanner_screen.dart';
 import 'package:sakuin/features/recurring/recurring_service.dart';
 import 'package:sakuin/features/transaction/transaction_form_sheet.dart';
 import 'package:sakuin/features/transaction/transaction_list_screen.dart';
@@ -135,6 +136,13 @@ class HomeScreen extends ConsumerWidget {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Scan Struk & Split Bill',
+            icon: const Icon(Icons.document_scanner_outlined),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ReceiptScannerScreen()),
+            ),
+          ),
           IconButton(
             tooltip: hideBalances ? 'Tampilkan saldo' : 'Sembunyikan saldo',
             icon: Icon(

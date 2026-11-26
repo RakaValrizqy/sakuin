@@ -20,5 +20,12 @@
 -dontwarn com.google.crypto.tink.**
 -dontwarn javax.annotation.**
 
-# FileProvider untuk auto-update APK dari cache internal
+# FileProvider untuk auto-update APK & foto struk dari cache internal
 -keep class androidx.core.content.FileProvider { *; }
+
+# WorkManager worker untuk cek pembaruan GitHub 1x/hari secara hemat baterai
+-keep class id.rakavalrizqy.sakuin.UpdateCheckWorker { *; }
+
+# Google ML Kit Text Recognition (on-device OCR)
+-dontwarn com.google.mlkit.**
+-dontwarn com.google.android.gms.**

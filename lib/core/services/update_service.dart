@@ -99,6 +99,20 @@ class UpdateService {
     }
   }
 
+  /// Sinkronkan jadwal WorkManager latar belakang (1x/24 jam, hanya saat ada internet &
+  /// baterai tidak rendah, memakai ETag 304) untuk mengirim notifikasi saat ada rilis baru.
+  Future<void> syncBackgroundUpdateWorker({required bool enabled}) async {
+    try {
+      final token = await getGitHubToken();
+      await _channel.invokeMethod('configureBackgroundUpdateCheck', {
+        'enabled': enabled,
+        'githubToken': token,
+      });
+    } catch (_) {
+      // Diabaikan di lingkungan non-Android / unit test.
+    }
+  }
+
   Future<AppVersionInfo> getAppInfo() async {
     try {
       final raw = await _channel.invokeMapMethod<String, dynamic>('getAppInfo');
@@ -109,8 +123,8 @@ class UpdateService {
                 .toList() ??
             const ['arm64-v8a'];
         return AppVersionInfo(
-          versionName: (raw['versionName'] as String?) ?? '1.4.0',
-          versionCode: (raw['versionCode'] as int?) ?? 5,
+          versionName: (raw['versionName'] as String?) ?? '1.5.0',
+          versionCode: (raw['versionCode'] as int?) ?? 6,
           supportedAbis: abis,
         );
       }
@@ -118,8 +132,8 @@ class UpdateService {
       // Fallback di lingkungan non-Android / unit test.
     }
     return const AppVersionInfo(
-      versionName: '1.4.0',
-      versionCode: 5,
+      versionName: '1.5.0',
+      versionCode: 6,
       supportedAbis: ['arm64-v8a'],
     );
   }

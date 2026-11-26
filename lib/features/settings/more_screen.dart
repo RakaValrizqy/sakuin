@@ -6,6 +6,7 @@ import 'package:sakuin/features/budget/budget_screen.dart';
 import 'package:sakuin/features/category/category_list_screen.dart';
 import 'package:sakuin/features/debt/debt_list_screen.dart';
 import 'package:sakuin/features/qris/qris_inbox_screen.dart';
+import 'package:sakuin/features/receipt/receipt_scanner_screen.dart';
 import 'package:sakuin/features/recurring/recurring_screen.dart';
 import 'package:sakuin/features/settings/backup_screen.dart';
 import 'package:sakuin/features/settings/settings_screen.dart';
@@ -52,6 +53,16 @@ class MoreScreen extends ConsumerWidget {
                   ),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => push(const DebtListScreen()),
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.document_scanner_rounded),
+                  title: const Text('Scan Struk & Split Bill'),
+                  subtitle: const Text(
+                    'Foto / share struk, bagi item per orang, & catat piutang',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => push(const ReceiptScannerScreen()),
                 ),
                 const Divider(height: 1),
                 ListTile(

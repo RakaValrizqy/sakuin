@@ -1,5 +1,11 @@
 # Catatan Rilis Sakuin
 
+## v1.5.0
+### Apa yang Baru
+- **Scan Struk Hybrid (Kamera, Galeri, & Share Gambar ke Sakuin):** Foto struk langsung dengan kamera, pilih dari galeri, atau langsung klik **Bagikan (Share)** dari Galeri/WhatsApp ke Sakuin! Default berjalan **100% offline dengan Google ML Kit** (dengan rekonstruksi baris otomatis), plus dukungan opsional **Gemini AI Vision** di Pengaturan dengan *fallback* otomatis ke offline jika sedang tidak ada sinyal.
+- **Fitur Split Bill Lengkap:** Bagi hasil scan struk ke banyak orang, pilih siapa beli item apa (termasuk item patungan beberapa orang), pembagian pajak/service/diskon secara proporsional atau rata tanpa selisih 1 rupiah, tombol **Salin / Bagikan Rincian**, serta 3 opsi penyimpanan: **Transaksi + Piutang/Hutang**, **Transaksi Biasa saja**, atau **Tidak Disimpan (Hanya Cek)**.
+- **Notifikasi Rilis Baru GitHub (Super Hemat Baterai):** Menggunakan Android `WorkManager` (1x/24 jam, hanya jalan saat ada internet & baterai tidak rendah, memakai header `If-None-Match` ETag 304) untuk memberi notifikasi otomatis saat versi Sakuin baru rilis di GitHub.
+
 ## v1.4.0
 ### Apa yang Baru
 - **Batas Tanggal Sinkron Email QRIS:** Kini bisa mengatur tanggal batas di menu **Auto QRIS (Gmail)** (mis. pilih 25 November → transaksi pada tanggal 25 November dan sebelumnya tidak akan diperiksa maupun dimasukkan ke antrean review, lengkap dengan opsi membersihkan antrean lama yang sudah terlanjur masuk).
