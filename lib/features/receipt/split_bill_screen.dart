@@ -27,6 +27,8 @@ class SplitBillScreen extends ConsumerStatefulWidget {
     this.tax = 0,
     this.serviceCharge = 0,
     this.discount = 0,
+    this.initialWalletId,
+    this.expectedTotal,
   });
 
   final String merchantName;
@@ -35,6 +37,10 @@ class SplitBillScreen extends ConsumerStatefulWidget {
   final int tax;
   final int serviceCharge;
   final int discount;
+  final int? initialWalletId;
+
+  /// Opsional: total asli transaksi (mis. dari email QRIS) sebagai acuan saat memecah item di Split Bill.
+  final int? expectedTotal;
 
   @override
   ConsumerState<SplitBillScreen> createState() => _SplitBillScreenState();
@@ -59,6 +65,7 @@ class _SplitBillScreenState extends ConsumerState<SplitBillScreen> {
   @override
   void initState() {
     super.initState();
+    _walletId = widget.initialWalletId;
     _participants = const [
       SplitBillParticipant(id: _selfId, name: 'Saya', isSelf: true),
     ];
@@ -213,33 +220,102 @@ class _SplitBillScreenState extends ConsumerState<SplitBillScreen> {
     });
   }
 
-  Future<void> _addExtraItemDialog() async {
-    final nameCtrl = TextEditingController();
-    final priceCtrl = TextEditingController();
-    final added = await showDialog<SplitBillItem>(
+  Future<void> _addOrEditItemDialog({int? editIndex}) async {
+    final existing = editIndex != null ? _items[editIndex] : null;
+    final nameCtrl = TextEditingController(text: existing?.name ?? '');
+    final priceCtrl = TextEditingController(
+      text: existing != null
+          ? CurrencyFormatter.format(existing.amount, withSymbol: false)
+          : '',
+    );
+    final quickItems = ref.read(quickItemsProvider).valueOrNull ?? const [];
+    final othersTotal =
+        _items.fold<int>(0, (s, e) => s + e.amount) - (existing?.amount ?? 0);
+    final expectedRemaining = widget.expectedTotal != null
+        ? (widget.expectedTotal! -
+              widget.tax -
+              widget.serviceCharge +
+              widget.discount -
+              othersTotal)
+        : 0;
+
+    final result = await showDialog<SplitBillItem>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Tambah Item'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: nameCtrl,
-              autofocus: true,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(labelText: 'Nama item'),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: priceCtrl,
-              keyboardType: TextInputType.number,
-              inputFormatters: [ThousandsSeparatorInputFormatter()],
-              decoration: const InputDecoration(
-                labelText: 'Harga',
-                prefixText: 'Rp ',
+        title: Text(existing == null ? 'Tambah Item' : 'Edit Item'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                autofocus: true,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Nama item',
+                  hintText: 'Contoh: Es Teh, Nasi Goreng',
+                ),
               ),
-            ),
-          ],
+              if (quickItems.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    for (final q in quickItems.take(6))
+                      ActionChip(
+                        visualDensity: VisualDensity.compact,
+                        label: Text(
+                          q.lastAmount > 0
+                              ? '${q.displayName} • ${CurrencyFormatter.formatCompact(q.lastAmount)}'
+                              : q.displayName,
+                          style: Theme.of(ctx).textTheme.labelSmall,
+                        ),
+                        onPressed: () {
+                          nameCtrl.text = q.displayName;
+                          if (priceCtrl.text.trim().isEmpty &&
+                              q.lastAmount > 0) {
+                            priceCtrl.text = CurrencyFormatter.format(
+                              q.lastAmount,
+                              withSymbol: false,
+                            );
+                          }
+                        },
+                      ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: priceCtrl,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [ThousandsSeparatorInputFormatter()],
+                      decoration: const InputDecoration(
+                        labelText: 'Harga',
+                        prefixText: 'Rp ',
+                      ),
+                    ),
+                  ),
+                  if (expectedRemaining > 0) ...[
+                    const SizedBox(width: 8),
+                    TextButton(
+                      onPressed: () {
+                        priceCtrl.text = CurrencyFormatter.format(
+                          expectedRemaining,
+                          withSymbol: false,
+                        );
+                      },
+                      child: const Text('Isi sisa'),
+                    ),
+                  ],
+                ],
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -253,23 +329,33 @@ class _SplitBillScreenState extends ConsumerState<SplitBillScreen> {
               if (n.isEmpty || a <= 0) return;
               Navigator.pop(
                 ctx,
-                SplitBillItem(
-                  id: 'item_${_nextIdCounter++}',
-                  name: n,
-                  amount: a,
-                  assignedPersonIds: const {_selfId},
-                ),
+                existing != null
+                    ? existing.copyWith(name: n, amount: a)
+                    : SplitBillItem(
+                        id: 'item_${_nextIdCounter++}',
+                        name: n,
+                        amount: a,
+                        assignedPersonIds: const {_selfId},
+                      ),
               );
             },
-            child: const Text('Tambah'),
+            child: Text(existing == null ? 'Tambah' : 'Simpan'),
           ),
         ],
       ),
     );
     nameCtrl.dispose();
     priceCtrl.dispose();
-    if (added != null) {
-      setState(() => _items = [..._items, added]);
+    if (result != null) {
+      setState(() {
+        if (editIndex != null) {
+          final updated = List<SplitBillItem>.from(_items);
+          updated[editIndex] = result;
+          _items = updated;
+        } else {
+          _items = [..._items, result];
+        }
+      });
     }
   }
 
@@ -304,7 +390,7 @@ class _SplitBillScreenState extends ConsumerState<SplitBillScreen> {
     List<Category> categories,
   ) async {
     if (_saveMode == _SplitSaveMode.checkOnly) {
-      Navigator.of(context).pop(true);
+      Navigator.of(context).pop(false);
       return;
     }
 
@@ -607,12 +693,56 @@ class _SplitBillScreenState extends ConsumerState<SplitBillScreen> {
             children: [
               Text('Pilih Item Tiap Orang', style: tt.titleMedium),
               TextButton.icon(
-                onPressed: _addExtraItemDialog,
+                onPressed: () => _addOrEditItemDialog(),
                 icon: const Icon(Icons.add_rounded, size: 18),
                 label: const Text('Item'),
               ),
             ],
           ),
+          if (widget.expectedTotal != null) ...[
+            Builder(
+              builder: (_) {
+                final diff = widget.expectedTotal! - res.grandTotal;
+                final isMatch = diff == 0;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Card(
+                    color: isMatch
+                        ? cs.primaryContainer.withValues(alpha: 0.35)
+                        : cs.tertiaryContainer.withValues(alpha: 0.45),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isMatch
+                                ? Icons.check_circle_outline_rounded
+                                : Icons.info_outline_rounded,
+                            size: 18,
+                            color: isMatch ? cs.primary : cs.tertiary,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              isMatch
+                                  ? 'Total item pas dengan QRIS (${CurrencyFormatter.format(widget.expectedTotal!)}). Ketuk item jika ingin dipecah/diedit.'
+                                  : (diff > 0
+                                        ? 'Total QRIS ${CurrencyFormatter.format(widget.expectedTotal!)} • Sisa ${CurrencyFormatter.format(diff)} belum dimasukkan'
+                                        : 'Total item melebihi QRIS sebesar ${CurrencyFormatter.format(diff.abs())}'),
+                              style: tt.bodySmall,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
           if (!res.allItemsAssigned)
             Padding(
               padding: const EdgeInsets.only(bottom: 8),
@@ -632,21 +762,40 @@ class _SplitBillScreenState extends ConsumerState<SplitBillScreen> {
                     Row(
                       children: [
                         Expanded(
-                          child: Text(
-                            _items[i].name,
-                            style: tt.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(8),
+                            onTap: () => _addOrEditItemDialog(editIndex: i),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 2),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      _items[i].name,
+                                      style: tt.titleSmall?.copyWith(
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    CurrencyFormatter.format(_items[i].amount),
+                                    style: tt.titleSmall?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      color: cs.primary,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  Icon(
+                                    Icons.edit_outlined,
+                                    size: 15,
+                                    color: cs.onSurfaceVariant,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
-                        Text(
-                          CurrencyFormatter.format(_items[i].amount),
-                          style: tt.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: cs.primary,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
                         TextButton(
                           style: TextButton.styleFrom(
                             visualDensity: VisualDensity.compact,
@@ -655,6 +804,19 @@ class _SplitBillScreenState extends ConsumerState<SplitBillScreen> {
                           onPressed: () => _toggleAssignAll(i),
                           child: const Text('Semua'),
                         ),
+                        if (_items.length > 1)
+                          IconButton(
+                            tooltip: 'Hapus item',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            onPressed: () {
+                              setState(() {
+                                final updated = List<SplitBillItem>.from(_items)
+                                  ..removeAt(i);
+                                _items = updated;
+                              });
+                            },
+                          ),
                       ],
                     ),
                     const SizedBox(height: 6),

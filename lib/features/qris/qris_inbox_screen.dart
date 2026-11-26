@@ -5,8 +5,10 @@ import 'package:sakuin/core/services/qris_sync_service.dart';
 import 'package:sakuin/core/services/settings_service.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/utils/haptics.dart';
+import 'package:sakuin/core/utils/receipt_parser.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/features/category/category_providers.dart';
+import 'package:sakuin/features/receipt/split_bill_screen.dart';
 import 'package:sakuin/features/transaction/split_transaction_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_providers.dart';
 
@@ -464,6 +466,38 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
     }
   }
 
+  Future<void> _splitBillDraft(
+    ImportedQrisDraft draft,
+    List<WalletWithBalance> wallets,
+  ) async {
+    final walletId =
+        (draft.suggestedWalletId != null &&
+            wallets.any((w) => w.wallet.id == draft.suggestedWalletId))
+        ? draft.suggestedWalletId
+        : (wallets.isNotEmpty ? wallets.first.wallet.id : null);
+
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => SplitBillScreen(
+          merchantName: draft.merchantName,
+          occurredAt: DateTime.fromMillisecondsSinceEpoch(draft.occurredAt)
+              .toLocal(),
+          initialItems: [
+            ParsedReceiptItem(
+              name: draft.merchantName,
+              totalPrice: draft.amount,
+            ),
+          ],
+          initialWalletId: walletId,
+          expectedTotal: draft.amount,
+        ),
+      ),
+    );
+    if (saved == true) {
+      await ref.read(qrisSyncServiceProvider).markDraftConfirmed(draft.id);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final draftsAsync = ref.watch(pendingQrisDraftsProvider);
@@ -871,7 +905,11 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                                           ),
                                         ),
                                         const SizedBox(height: 12),
-                                        Row(
+                                        Wrap(
+                                          spacing: 8,
+                                          runSpacing: 6,
+                                          crossAxisAlignment:
+                                              WrapCrossAlignment.center,
                                           children: [
                                             TextButton(
                                               onPressed: () => ref
@@ -879,17 +917,26 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                                                   .dismissDraft(draft.id),
                                               child: const Text('Abaikan'),
                                             ),
-                                            const Spacer(),
                                             OutlinedButton.icon(
                                               onPressed: () =>
                                                   _splitDraft(draft, wallets),
                                               icon: const Icon(
                                                 Icons.call_split_rounded,
-                                                size: 18,
+                                                size: 16,
                                               ),
                                               label: const Text('Pecah Item'),
                                             ),
-                                            const SizedBox(width: 8),
+                                            OutlinedButton.icon(
+                                              onPressed: () => _splitBillDraft(
+                                                draft,
+                                                wallets,
+                                              ),
+                                              icon: const Icon(
+                                                Icons.groups_rounded,
+                                                size: 16,
+                                              ),
+                                              label: const Text('Split Bill'),
+                                            ),
                                             FilledButton(
                                               onPressed: () =>
                                                   _confirmSingleDialog(

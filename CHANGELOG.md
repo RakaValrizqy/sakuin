@@ -1,5 +1,9 @@
 # Catatan Rilis Sakuin
 
+## v1.5.4
+### Apa yang Baru
+- **Split Bill Langsung dari Antrean QRIS (Gmail):** Setiap transaksi di antrean review Auto QRIS kini memiliki tombol **Split Bill** — bisa langsung dibagi ke beberapa orang (sama rata atau dipecah per item dengan saran nama otomatis & tombol *Isi sisa* yang mencocokkan total QRIS), lalu disimpan ke **Transaksi + Piutang/Hutang**, **Transaksi Biasa**, atau **Tidak Disimpan (Hanya Cek)**.
+
 ## v1.5.3
 ### Peningkatan & Perbaikan
 - **Deteksi Email QRIS (Gmail) Lebih Akurat & Luas:** Memperbesar batas baca isi email HTML bank dari 32 KB ke 128 KB (agar struk email panjang tidak terpotong), menaikkan batas scan dari 80 ke 200 email terbaru, memperluas dukungan bank & subjek resi, serta mencegah disclaimer footer bank (seperti kata *"gagal"* atau *"promo"*) menolak struk QRIS yang sebenarnya berhasil.
