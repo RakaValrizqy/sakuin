@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 
 class AppVersionInfo {
@@ -26,6 +27,7 @@ class ReleaseUpdateInfo {
     required this.apkDownloadUrl,
     required this.apkFileName,
     required this.apkSizeBytes,
+    this.apiAssetUrl,
     this.publishedAt,
   });
 
@@ -34,6 +36,7 @@ class ReleaseUpdateInfo {
   final String title;
   final String changelog;
   final String apkDownloadUrl;
+  final String? apiAssetUrl;
   final String apkFileName;
   final int apkSizeBytes;
   final DateTime? publishedAt;
@@ -60,11 +63,41 @@ class UpdateCheckResult {
 }
 
 class UpdateService {
-  UpdateService();
+  UpdateService()
+    : _storage = const FlutterSecureStorage(
+        aOptions: AndroidOptions(encryptedSharedPreferences: true),
+      );
 
   static const _channel = MethodChannel('id.rakavalrizqy.sakuin/updater');
+  static const _kGitHubToken = 'sakuin_github_update_token';
   static const _latestReleaseUrl =
       'https://api.github.com/repos/RakaValrizqy/sakuin/releases/latest';
+
+  final FlutterSecureStorage _storage;
+
+  Future<String?> getGitHubToken() async {
+    try {
+      final token = await _storage.read(key: _kGitHubToken);
+      if (token == null || token.trim().isEmpty) return null;
+      return token.trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> hasGitHubToken() async {
+    final token = await getGitHubToken();
+    return token != null && token.isNotEmpty;
+  }
+
+  Future<void> saveGitHubToken(String? token) async {
+    final cleaned = token?.trim() ?? '';
+    if (cleaned.isEmpty) {
+      await _storage.delete(key: _kGitHubToken);
+    } else {
+      await _storage.write(key: _kGitHubToken, value: cleaned);
+    }
+  }
 
   Future<AppVersionInfo> getAppInfo() async {
     try {
@@ -76,8 +109,8 @@ class UpdateService {
                 .toList() ??
             const ['arm64-v8a'];
         return AppVersionInfo(
-          versionName: (raw['versionName'] as String?) ?? '1.1.0',
-          versionCode: (raw['versionCode'] as int?) ?? 1,
+          versionName: (raw['versionName'] as String?) ?? '1.3.0',
+          versionCode: (raw['versionCode'] as int?) ?? 4,
           supportedAbis: abis,
         );
       }
@@ -85,8 +118,8 @@ class UpdateService {
       // Fallback di lingkungan non-Android / unit test.
     }
     return const AppVersionInfo(
-      versionName: '1.1.0',
-      versionCode: 1,
+      versionName: '1.3.0',
+      versionCode: 4,
       supportedAbis: ['arm64-v8a'],
     );
   }
@@ -184,6 +217,12 @@ class UpdateService {
     final downloadUrl = (bestAsset['browser_download_url'] as String?) ?? '';
     if (!isTrustedGitHubUrl(downloadUrl)) return null;
 
+    final rawApiAssetUrl = (bestAsset['url'] as String?)?.trim();
+    final apiAssetUrl =
+        rawApiAssetUrl != null && isTrustedGitHubUrl(rawApiAssetUrl)
+        ? rawApiAssetUrl
+        : null;
+
     final body = (json['body'] as String?)?.trim() ?? '';
     return ReleaseUpdateInfo(
       tagName: tagName,
@@ -195,6 +234,7 @@ class UpdateService {
           ? 'Peningkatan performa dan perbaikan bug.'
           : body,
       apkDownloadUrl: downloadUrl,
+      apiAssetUrl: apiAssetUrl,
       apkFileName: (bestAsset['name'] as String?) ?? 'sakuin-update.apk',
       apkSizeBytes: (bestAsset['size'] as int?) ?? 0,
       publishedAt: json['published_at'] is String
@@ -214,6 +254,8 @@ class UpdateService {
 
   Future<UpdateCheckResult> checkForUpdate() async {
     final appInfo = await getAppInfo();
+    final token = await getGitHubToken();
+    final hasToken = token != null && token.isNotEmpty;
     final client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
     try {
       final request = await client.getUrl(Uri.parse(_latestReleaseUrl));
@@ -222,14 +264,27 @@ class UpdateService {
         'application/vnd.github+json',
       );
       request.headers.set(HttpHeaders.userAgentHeader, 'Sakuin-Android-App');
+      if (hasToken) {
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+      }
       final response = await request.close().timeout(
         const Duration(seconds: 10),
       );
       if (response.statusCode != 200) {
+        final message = switch (response.statusCode) {
+          404 =>
+            hasToken
+                ? 'Rilis tidak ditemukan atau Token GitHub belum memiliki izin baca Contents (HTTP 404).'
+                : 'Repo GitHub masih Private atau rilis belum tersedia (HTTP 404). Ubah repo ke Public atau masukkan Token GitHub di Pengaturan → Pembaruan Aplikasi.',
+          401 || 403 =>
+            hasToken
+                ? 'Token GitHub ditolak atau kedaluwarsa (HTTP ${response.statusCode}). Periksa ulang token di Pengaturan.'
+                : 'Akses GitHub dibatasi sementara (HTTP ${response.statusCode}). Coba lagi nanti atau gunakan Token GitHub.',
+          _ => 'Tidak dapat memeriksa pembaruan (HTTP ${response.statusCode})',
+        };
         return UpdateCheckResult(
           currentVersion: appInfo.versionName,
-          errorMessage:
-              'Tidak dapat memeriksa pembaruan (HTTP ${response.statusCode})',
+          errorMessage: message,
         );
       }
       final bodyStr = await response.transform(utf8.decoder).join();
@@ -265,6 +320,8 @@ class UpdateService {
   }
 
   /// Unduh APK dari GitHub Release ke folder cache `updates/` dengan progress real-time.
+  /// Untuk repo Private (dengan token), menggunakan endpoint Asset API + manual redirect
+  /// agar header Authorization tidak diteruskan ke URL CDN signed.
   Future<File> downloadUpdateApk(
     ReleaseUpdateInfo info, {
     required void Function(int received, int total) onProgress,
@@ -274,6 +331,13 @@ class UpdateService {
         'URL unduhan tidak berasal dari GitHub resmi.',
       );
     }
+
+    final token = await getGitHubToken();
+    final usePrivateApi =
+        token != null &&
+        token.isNotEmpty &&
+        info.apiAssetUrl != null &&
+        isTrustedGitHubUrl(info.apiAssetUrl!);
 
     final cacheDir = await getTemporaryDirectory();
     final updateDir = Directory('${cacheDir.path}/updates');
@@ -287,9 +351,42 @@ class UpdateService {
     final client = HttpClient()
       ..connectionTimeout = const Duration(seconds: 15);
     try {
-      final request = await client.getUrl(Uri.parse(info.apkDownloadUrl));
-      request.headers.set(HttpHeaders.userAgentHeader, 'Sakuin-Android-App');
-      final response = await request.close();
+      HttpClientResponse response;
+      if (usePrivateApi) {
+        final apiReq = await client.getUrl(Uri.parse(info.apiAssetUrl!));
+        apiReq.followRedirects = false;
+        apiReq.headers.set(HttpHeaders.userAgentHeader, 'Sakuin-Android-App');
+        apiReq.headers.set(
+          HttpHeaders.acceptHeader,
+          'application/octet-stream',
+        );
+        apiReq.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        final apiRes = await apiReq.close();
+
+        if (apiRes.isRedirect ||
+            apiRes.statusCode == 301 ||
+            apiRes.statusCode == 302 ||
+            apiRes.statusCode == 303 ||
+            apiRes.statusCode == 307 ||
+            apiRes.statusCode == 308) {
+          final location = apiRes.headers.value(HttpHeaders.locationHeader);
+          await apiRes.drain<void>();
+          if (location == null || !isTrustedGitHubUrl(location)) {
+            throw const FormatException(
+              'URL pengalihan unduhan tidak berasal dari GitHub resmi.',
+            );
+          }
+          final cdnReq = await client.getUrl(Uri.parse(location));
+          cdnReq.headers.set(HttpHeaders.userAgentHeader, 'Sakuin-Android-App');
+          response = await cdnReq.close();
+        } else {
+          response = apiRes;
+        }
+      } else {
+        final request = await client.getUrl(Uri.parse(info.apkDownloadUrl));
+        request.headers.set(HttpHeaders.userAgentHeader, 'Sakuin-Android-App');
+        response = await request.close();
+      }
 
       if (response.statusCode != 200) {
         throw HttpException(
@@ -346,4 +443,12 @@ class UpdateService {
 
 final updateServiceProvider = Provider<UpdateService>((ref) {
   return UpdateService();
+});
+
+final appVersionInfoProvider = FutureProvider<AppVersionInfo>((ref) {
+  return ref.watch(updateServiceProvider).getAppInfo();
+});
+
+final hasGitHubTokenProvider = FutureProvider<bool>((ref) {
+  return ref.watch(updateServiceProvider).hasGitHubToken();
 });

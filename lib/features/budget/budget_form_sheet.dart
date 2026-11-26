@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sakuin/core/db/app_database.dart';
 import 'package:sakuin/core/utils/amount_parser.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
+import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/features/budget/budget_providers.dart';
 import 'package:sakuin/features/category/category_providers.dart';
 
@@ -99,10 +100,12 @@ class _BudgetFormSheetState extends ConsumerState<BudgetFormSheet> {
             TextField(
               controller: _amountCtrl,
               autofocus: true,
+              keyboardType: TextInputType.number,
+              inputFormatters: [ThousandsSeparatorInputFormatter()],
               decoration: const InputDecoration(
                 labelText: 'Batas anggaran per periode',
                 prefixText: 'Rp ',
-                hintText: 'Contoh: 1,5jt atau 500k',
+                hintText: '1.500.000',
               ),
             ),
             const SizedBox(height: 18),

@@ -13,6 +13,7 @@ import 'package:sakuin/features/debt/debt_list_screen.dart';
 import 'package:sakuin/features/debt/debt_providers.dart';
 import 'package:sakuin/features/qris/qris_inbox_screen.dart';
 import 'package:sakuin/features/recurring/recurring_service.dart';
+import 'package:sakuin/features/report/report_screen.dart';
 import 'package:sakuin/features/transaction/transaction_form_sheet.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
 import 'package:sakuin/features/transaction/widgets/transaction_tile.dart';
@@ -27,9 +28,16 @@ final currentPeriodSummaryProvider = StreamProvider<PeriodSummary>((ref) {
 });
 
 class HomeScreen extends ConsumerWidget {
-  const HomeScreen({super.key, required this.onSeeAllTransactions});
+  const HomeScreen({
+    super.key,
+    required this.onSeeAllTransactions,
+    this.onOpenWallets,
+    this.onOpenDebts,
+  });
 
   final VoidCallback onSeeAllTransactions;
+  final VoidCallback? onOpenWallets;
+  final VoidCallback? onOpenDebts;
 
   Future<void> _onQuickItemTap(
     BuildContext context,
@@ -128,6 +136,12 @@ class HomeScreen extends ConsumerWidget {
           ],
         ),
         actions: [
+          IconButton(
+            tooltip: 'Laporan & Grafik',
+            icon: const Icon(Icons.bar_chart_rounded),
+            onPressed: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const ReportScreen())),
+          ),
           IconButton(
             tooltip: hideBalances ? 'Tampilkan saldo' : 'Sembunyikan saldo',
             icon: Icon(
@@ -234,11 +248,17 @@ class HomeScreen extends ConsumerWidget {
                 child: Card(
                   child: InkWell(
                     borderRadius: BorderRadius.circular(18),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => const WalletListScreen(),
-                      ),
-                    ),
+                    onTap: () {
+                      if (onOpenWallets != null) {
+                        onOpenWallets!();
+                      } else {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const WalletListScreen(),
+                          ),
+                        );
+                      }
+                    },
                     child: Padding(
                       padding: const EdgeInsets.all(14),
                       child: Column(
@@ -287,9 +307,17 @@ class HomeScreen extends ConsumerWidget {
                 child: Card(
                   child: InkWell(
                     borderRadius: BorderRadius.circular(18),
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(builder: (_) => const DebtListScreen()),
-                    ),
+                    onTap: () {
+                      if (onOpenDebts != null) {
+                        onOpenDebts!();
+                      } else {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const DebtListScreen(),
+                          ),
+                        );
+                      }
+                    },
                     child: Padding(
                       padding: const EdgeInsets.all(14),
                       child: Column(

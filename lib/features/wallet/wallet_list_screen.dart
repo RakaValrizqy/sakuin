@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sakuin/core/db/app_database.dart';
 import 'package:sakuin/core/utils/amount_parser.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
+import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
 import 'package:sakuin/core/widgets/empty_state.dart';
@@ -41,6 +42,8 @@ class _WalletListScreenState extends ConsumerState<WalletListScreen> {
             TextField(
               controller: ctrl,
               autofocus: true,
+              keyboardType: TextInputType.number,
+              inputFormatters: [ThousandsSeparatorInputFormatter()],
               decoration: const InputDecoration(
                 labelText: 'Saldo nyata sekarang',
                 prefixText: 'Rp ',

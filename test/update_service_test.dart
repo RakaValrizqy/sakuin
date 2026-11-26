@@ -33,6 +33,7 @@ void main() {
         {
           'name': 'app-arm64-v8a-release.apk',
           'size': 16500000,
+          'url': 'https://api.github.com/repos/RakaValrizqy/sakuin/releases/assets/987654',
           'browser_download_url': 'https://github.com/RakaValrizqy/sakuin/releases/download/v1.1.0/app-arm64-v8a-release.apk',
         },
       ],
@@ -47,6 +48,10 @@ void main() {
       expect(update, isNotNull);
       expect(update!.versionName, '1.1.0');
       expect(update.apkFileName, 'app-arm64-v8a-release.apk');
+      expect(
+        update.apiAssetUrl,
+        'https://api.github.com/repos/RakaValrizqy/sakuin/releases/assets/987654',
+      );
       expect(update.changelog, contains('Pos Budget'));
     });
 
@@ -63,6 +68,18 @@ void main() {
       expect(
         UpdateService.isTrustedGitHubUrl(
           'https://github.com/RakaValrizqy/sakuin/releases/download/v1.1.0/app.apk',
+        ),
+        isTrue,
+      );
+      expect(
+        UpdateService.isTrustedGitHubUrl(
+          'https://api.github.com/repos/RakaValrizqy/sakuin/releases/assets/123',
+        ),
+        isTrue,
+      );
+      expect(
+        UpdateService.isTrustedGitHubUrl(
+          'https://objects.githubusercontent.com/github-production-release-asset/app.apk',
         ),
         isTrue,
       );

@@ -213,6 +213,23 @@ class WalletActions {
     );
   }
 
+  /// Simpan alokasi beberapa pos budget dalam satu saku sekaligus secara atomik.
+  Future<void> saveBulkPocketAllocations({
+    required int walletId,
+    required Map<int, int> targetBalanceByPocketId,
+  }) async {
+    await _db.transaction(() async {
+      for (final entry in targetBalanceByPocketId.entries) {
+        await _db.setPocketBalanceManually(
+          walletId: walletId,
+          pocketId: entry.key,
+          targetBalance: entry.value,
+          note: 'Atur alokasi budget saku',
+        );
+      }
+    });
+  }
+
   Future<bool> deleteOrArchivePocket(int walletId, int pocketId) =>
       _db.deleteOrArchivePocket(walletId, pocketId);
 }

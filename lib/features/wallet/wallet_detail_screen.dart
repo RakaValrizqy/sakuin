@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sakuin/core/constants/app_colors.dart';
+import 'package:sakuin/core/constants/app_icons.dart';
 import 'package:sakuin/core/db/app_database.dart';
 import 'package:sakuin/core/db/db_provider.dart';
 import 'package:sakuin/core/utils/amount_parser.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
+import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
 import 'package:sakuin/features/wallet/pocket_sheets.dart';
@@ -65,6 +67,8 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
         content: TextField(
           controller: ctrl,
           autofocus: true,
+          keyboardType: TextInputType.number,
+          inputFormatters: [ThousandsSeparatorInputFormatter()],
           decoration: const InputDecoration(
             labelText: 'Saldo nyata sekarang',
             prefixText: 'Rp ',
@@ -236,18 +240,6 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
                 Expanded(
                   child: Text('Pembagian Budget Saku', style: tt.titleMedium),
                 ),
-                if (pockets.isNotEmpty)
-                  TextButton.icon(
-                    onPressed: () => showPocketAllocateSheet(
-                      context,
-                      walletId: wb.wallet.id,
-                      walletName: wb.wallet.name,
-                      unallocatedBalance: unallocated,
-                      pockets: pockets,
-                    ),
-                    icon: const Icon(Icons.swap_horiz_rounded, size: 18),
-                    label: const Text('Pindah'),
-                  ),
                 FilledButton.tonalIcon(
                   onPressed: () => showPocketFormSheet(
                     context,
@@ -259,6 +251,38 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
                 ),
               ],
             ),
+            if (pockets.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: FilledButton.icon(
+                      onPressed: () => showBulkAllocateSheet(
+                        context,
+                        walletId: wb.wallet.id,
+                        walletName: wb.wallet.name,
+                        totalWalletBalance: wb.balance,
+                        pockets: pockets,
+                      ),
+                      icon: const Icon(Icons.tune_rounded, size: 18),
+                      label: const Text('Atur Semua Alokasi'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    onPressed: () => showPocketAllocateSheet(
+                      context,
+                      walletId: wb.wallet.id,
+                      walletName: wb.wallet.name,
+                      unallocatedBalance: unallocated,
+                      pockets: pockets,
+                    ),
+                    icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                    label: const Text('Pindah'),
+                  ),
+                ],
+              ),
+            ],
             const SizedBox(height: 8),
 
             Card(
@@ -347,10 +371,32 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
                     if (pockets.isEmpty) ...[
                       const Divider(height: 22),
                       Text(
-                        'Bagi saldo ${wb.wallet.name} menjadi beberapa pos budget (mis. Uang Harian & Tabungan) tanpa harus membuat saku terpisah.',
+                        'Bagi saldo ${wb.wallet.name} jadi beberapa pos budget tanpa bikin saku baru. Ketuk pintasan cepat:',
                         style: tt.bodySmall?.copyWith(
                           color: cs.onSurfaceVariant,
                         ),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final preset in pocketPresets.take(4))
+                            ActionChip(
+                              avatar: Icon(
+                                AppIcons.fromKey(preset.icon),
+                                size: 16,
+                                color: Color(preset.color),
+                              ),
+                              label: Text('+ ${preset.name}'),
+                              onPressed: () => showPocketFormSheet(
+                                context,
+                                walletId: wb.wallet.id,
+                                unallocatedBalance: unallocated,
+                                initialPreset: preset,
+                              ),
+                            ),
+                        ],
                       ),
                     ] else ...[
                       const Divider(height: 22),
@@ -358,6 +404,7 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
                         if (i > 0) const Divider(height: 16),
                         _PocketRow(
                           item: pockets[i],
+                          walletTotalBalance: wb.balance,
                           onAllocate: () => showPocketAllocateSheet(
                             context,
                             walletId: wb.wallet.id,
@@ -519,12 +566,14 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
 class _PocketRow extends StatelessWidget {
   const _PocketRow({
     required this.item,
+    required this.walletTotalBalance,
     required this.onAllocate,
     required this.onEdit,
     required this.onDelete,
   });
 
   final PocketWithBalance item;
+  final int walletTotalBalance;
   final VoidCallback onAllocate;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -534,6 +583,9 @@ class _PocketRow extends StatelessWidget {
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
     final progress = item.targetProgress;
+    final sharePct = walletTotalBalance > 0 && item.balance > 0
+        ? ((item.balance / walletTotalBalance) * 100).round()
+        : 0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -551,7 +603,27 @@ class _PocketRow extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(item.pocket.name, style: tt.titleMedium),
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          item.pocket.name,
+                          style: tt.titleMedium,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (sharePct > 0) ...[
+                        const SizedBox(width: 6),
+                        Text(
+                          '$sharePct%',
+                          style: tt.labelSmall?.copyWith(
+                            color: Color(item.pocket.color),
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                   if (item.pocket.targetAmount != null &&
                       item.pocket.targetAmount! > 0)
                     Text(
@@ -565,27 +637,6 @@ class _PocketRow extends StatelessWidget {
               amount: item.balance,
               type: item.balance < 0 ? 'expense' : null,
               style: tt.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-            ),
-            PopupMenuButton<String>(
-              onSelected: (v) {
-                if (v == 'move') onAllocate();
-                if (v == 'edit') onEdit();
-                if (v == 'delete') onDelete();
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: 'move',
-                  child: Text('Alokasi / Pindah budget'),
-                ),
-                PopupMenuItem(
-                  value: 'edit',
-                  child: Text('Edit & atur saldo manual'),
-                ),
-                PopupMenuItem(
-                  value: 'delete',
-                  child: Text('Hapus / Arsipkan pos'),
-                ),
-              ],
             ),
           ],
         ),
@@ -601,6 +652,34 @@ class _PocketRow extends StatelessWidget {
             ),
           ),
         ],
+        const SizedBox(height: 6),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            TextButton.icon(
+              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+              onPressed: onAllocate,
+              icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+              label: const Text('Pindah'),
+            ),
+            TextButton.icon(
+              style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+              onPressed: onEdit,
+              icon: const Icon(Icons.edit_outlined, size: 16),
+              label: const Text('Atur'),
+            ),
+            IconButton(
+              tooltip: 'Hapus / Arsipkan pos',
+              visualDensity: VisualDensity.compact,
+              icon: Icon(
+                Icons.delete_outline_rounded,
+                size: 18,
+                color: cs.onSurfaceVariant,
+              ),
+              onPressed: onDelete,
+            ),
+          ],
+        ),
       ],
     );
   }

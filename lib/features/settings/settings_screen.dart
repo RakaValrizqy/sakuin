@@ -27,6 +27,8 @@ class SettingsScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final settings = ref.watch(settingsProvider);
     final notifier = ref.read(settingsProvider.notifier);
+    final appVersion = ref.watch(appVersionInfoProvider).valueOrNull;
+    final hasToken = ref.watch(hasGitHubTokenProvider).valueOrNull ?? false;
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
 
@@ -340,6 +342,16 @@ class SettingsScreen extends ConsumerWidget {
           Card(
             child: Column(
               children: [
+                ListTile(
+                  leading: const Icon(Icons.info_outline_rounded),
+                  title: const Text('Versi Aplikasi'),
+                  subtitle: Text(
+                    appVersion != null
+                        ? 'v${appVersion.versionName} (Build ${appVersion.versionCode})'
+                        : 'Memuat versi...',
+                  ),
+                ),
+                const Divider(height: 1),
                 SwitchListTile(
                   secondary: const Icon(Icons.system_update_rounded),
                   title: const Text('Cek pembaruan otomatis'),
@@ -348,6 +360,18 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                   value: settings.autoCheckUpdate,
                   onChanged: notifier.setAutoCheckUpdate,
+                ),
+                const Divider(height: 1),
+                ListTile(
+                  leading: const Icon(Icons.key_rounded),
+                  title: const Text('Token GitHub (untuk repo Private)'),
+                  subtitle: Text(
+                    hasToken
+                        ? 'Terpasang (tersimpan terenkripsi di perangkat)'
+                        : 'Opsional — kosongkan jika repo GitHub bersifat Public',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => _showGitHubTokenDialog(context, ref, hasToken),
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -371,7 +395,10 @@ class SettingsScreen extends ConsumerWidget {
                     ScaffoldMessenger.of(context).hideCurrentSnackBar();
                     if (result.errorMessage != null) {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text(result.errorMessage!)),
+                        SnackBar(
+                          content: Text(result.errorMessage!),
+                          duration: const Duration(seconds: 6),
+                        ),
                       );
                       return;
                     }
@@ -400,13 +427,96 @@ class SettingsScreen extends ConsumerWidget {
           const SizedBox(height: 20),
           Center(
             child: Text(
-              'Sakuin • Offline-first • Tanpa server & tanpa iklan',
+              appVersion != null
+                  ? 'Sakuin v${appVersion.versionName} (Build ${appVersion.versionCode}) • Offline-first'
+                  : 'Sakuin • Offline-first • Tanpa server & tanpa iklan',
               style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
             ),
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _showGitHubTokenDialog(
+    BuildContext context,
+    WidgetRef ref,
+    bool hasToken,
+  ) async {
+    final controller = TextEditingController();
+    final saved = await showDialog<String?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Token GitHub (Opsional)'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Diperlukan hanya jika repositori GitHub RakaValrizqy/sakuin bersifat Private.\n\n'
+                'Cara buat:\n'
+                '1. Buka GitHub → Settings → Developer settings → Personal access tokens → Fine-grained tokens.\n'
+                '2. Pilih repo sakuin.\n'
+                '3. Repository permissions → Contents: Read-only.\n'
+                '4. Salin token lalu tempel di bawah.',
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                obscureText: true,
+                decoration: InputDecoration(
+                  labelText: hasToken
+                      ? 'Tempel token baru untuk mengganti'
+                      : 'github_pat_...',
+                  hintText: 'github_pat_...',
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          if (hasToken)
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, '__DELETE__'),
+              child: const Text('Hapus Token'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, controller.text.trim()),
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (saved == null) return;
+    final service = ref.read(updateServiceProvider);
+    if (saved == '__DELETE__') {
+      await service.saveGitHubToken(null);
+      ref.invalidate(hasGitHubTokenProvider);
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Token GitHub dihapus')));
+      }
+      return;
+    }
+    if (saved.isEmpty) return;
+    await service.saveGitHubToken(saved);
+    ref.invalidate(hasGitHubTokenProvider);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Token GitHub disimpan terenkripsi. Silakan cek pembaruan.',
+          ),
+        ),
+      );
+    }
   }
 }
 

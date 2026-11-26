@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sakuin/core/services/qris_sync_service.dart';
+import 'package:sakuin/core/services/update_service.dart';
 import 'package:sakuin/features/budget/budget_screen.dart';
 import 'package:sakuin/features/category/category_list_screen.dart';
-import 'package:sakuin/features/debt/debt_list_screen.dart';
 import 'package:sakuin/features/qris/qris_inbox_screen.dart';
 import 'package:sakuin/features/recurring/recurring_screen.dart';
+import 'package:sakuin/features/report/report_screen.dart';
 import 'package:sakuin/features/settings/backup_screen.dart';
 import 'package:sakuin/features/settings/settings_screen.dart';
-import 'package:sakuin/features/wallet/wallet_list_screen.dart';
 
 class MoreScreen extends ConsumerWidget {
   const MoreScreen({super.key});
@@ -17,6 +17,9 @@ class MoreScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final pendingQrisCount =
         ref.watch(pendingQrisDraftsProvider).valueOrNull?.length ?? 0;
+    final appVersion = ref.watch(appVersionInfoProvider).valueOrNull;
+    final tt = Theme.of(context).textTheme;
+    final cs = Theme.of(context).colorScheme;
 
     void push(Widget screen) {
       Navigator.of(context).push(MaterialPageRoute(builder: (_) => screen));
@@ -25,19 +28,19 @@ class MoreScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Lainnya')),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
         children: [
           Card(
             child: Column(
               children: [
                 ListTile(
-                  leading: const Icon(Icons.account_balance_wallet_outlined),
-                  title: const Text('Saku & Dompet'),
+                  leading: const Icon(Icons.bar_chart_rounded),
+                  title: const Text('Laporan & Grafik'),
                   subtitle: const Text(
-                    'Kelola dompet, pos budget, transfer, koreksi saldo',
+                    'Ringkasan periode, donut kategori, tren, ekspor CSV/PDF',
                   ),
                   trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => push(const WalletListScreen()),
+                  onTap: () => push(const ReportScreen()),
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -59,13 +62,11 @@ class MoreScreen extends ConsumerWidget {
                 ),
                 const Divider(height: 1),
                 ListTile(
-                  leading: const Icon(Icons.handshake_outlined),
-                  title: const Text('Hutang & Piutang'),
-                  subtitle: const Text(
-                    'Catatan hutang teman, cicilan, penagihan',
-                  ),
+                  leading: const Icon(Icons.pie_chart_outline_rounded),
+                  title: const Text('Anggaran'),
+                  subtitle: const Text('Batas belanja bulanan & peringatan'),
                   trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => push(const DebtListScreen()),
+                  onTap: () => push(const BudgetScreen()),
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -74,14 +75,6 @@ class MoreScreen extends ConsumerWidget {
                   subtitle: const Text('Ubah atau tambah kategori kustom'),
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: () => push(const CategoryListScreen()),
-                ),
-                const Divider(height: 1),
-                ListTile(
-                  leading: const Icon(Icons.pie_chart_outline_rounded),
-                  title: const Text('Anggaran'),
-                  subtitle: const Text('Batas belanja bulanan & peringatan'),
-                  trailing: const Icon(Icons.chevron_right_rounded),
-                  onTap: () => push(const BudgetScreen()),
                 ),
                 const Divider(height: 1),
                 ListTile(
@@ -118,6 +111,15 @@ class MoreScreen extends ConsumerWidget {
                   onTap: () => push(const SettingsScreen()),
                 ),
               ],
+            ),
+          ),
+          const SizedBox(height: 20),
+          Center(
+            child: Text(
+              appVersion != null
+                  ? 'Sakuin v${appVersion.versionName} (Build ${appVersion.versionCode})'
+                  : 'Sakuin',
+              style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
             ),
           ),
         ],

@@ -8,6 +8,7 @@ import 'package:sakuin/core/services/settings_service.dart';
 import 'package:sakuin/core/utils/amount_parser.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
 import 'package:sakuin/core/utils/haptics.dart';
+import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/features/wallet/wallet_providers.dart';
 
 Future<int?> showWalletFormSheet(BuildContext context, {Wallet? existing}) {
@@ -183,11 +184,12 @@ class _WalletFormSheetState extends ConsumerState<WalletFormSheet> {
 
               TextFormField(
                 controller: _balanceCtrl,
-                keyboardType: TextInputType.text,
+                keyboardType: TextInputType.number,
+                inputFormatters: [ThousandsSeparatorInputFormatter()],
                 decoration: const InputDecoration(
                   labelText: 'Saldo awal (opsional)',
                   prefixText: 'Rp ',
-                  hintText: '0 (mendukung 500k, 1,5jt)',
+                  hintText: '0',
                 ),
               ),
               const SizedBox(height: 14),

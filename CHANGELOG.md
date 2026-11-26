@@ -1,5 +1,13 @@
 # Catatan Rilis Sakuin
 
+## v1.3.0
+### Apa yang Baru
+- **Dompet & Hutang di Menu Utama (Navbar):** Dompet dan Hutang-Piutang kini bisa langsung diakses dari bilah navigasi bawah (Beranda, Transaksi, Dompet, Hutang, Lainnya), sedangkan Laporan & Grafik tersedia di ikon atas Beranda dan tab Lainnya.
+- **Input Nominal Lebih Nyaman:** Semua kolom nominal kini langsung membuka **keyboard angka (numpad)** dan otomatis memformat **titik pemisah ribuan** saat mengetik (mis. `300000` → `Rp 300.000`).
+- **UX Alokasi Pos Budget Baru:** Layar **Atur Semua Alokasi** pada detail saku dengan tampilan total saldo vs saldo bebas secara *real-time*, grafik batang proporsi pos, slider interaktif, tombol cepat (`+50 rb`, `+100 rb`, `Isi sisa`, `Bagi rata`, `0`), serta tombol cepat buat pos preset 1 ketukan.
+- **Tampilan Versi Aplikasi:** Nomor versi & build terpasang kini tampil jelas di menu **Lainnya** dan **Pengaturan → Pembaruan Aplikasi**.
+- **Dukungan Auto-Update Repo Private:** Menambahkan opsi **Token GitHub (opsional)** terenkripsi di Pengaturan agar auto-update tetap berjalan lancar meski repositori GitHub bersifat *Private*, disertai pesan error HTTP 404 yang informatif.
+
 ## v1.2.0
 ### Apa yang Baru
 - **Auto Catat Pengeluaran dari Email QRIS (Gmail):** Hubungkan Gmail memakai App Password (16 huruf, tanpa setup Google Cloud Console & tidak perlu login ulang tiap 7 hari). Sakuin membaca email QRIS dari Mandiri/Livin', BCA, BRI, BNI, BSI, GoPay, OVO, DANA, ShopeePay, SeaBank, Jago, dll. dalam mode *read-only* lalu memasukkannya ke **Antrean Review QRIS** (tersedia juga opsi langsung simpan otomatis).

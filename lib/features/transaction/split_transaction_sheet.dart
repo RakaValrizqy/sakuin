@@ -8,6 +8,7 @@ import 'package:sakuin/core/utils/amount_parser.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/utils/haptics.dart';
+import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/features/category/category_providers.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
 import 'package:sakuin/features/wallet/wallet_providers.dart';
@@ -555,11 +556,15 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
                                     Expanded(
                                       child: TextField(
                                         controller: row.amountCtrl,
+                                        keyboardType: TextInputType.number,
+                                        inputFormatters: [
+                                          ThousandsSeparatorInputFormatter(),
+                                        ],
                                         onChanged: (_) => setState(() {}),
                                         decoration: const InputDecoration(
                                           labelText: 'Nominal',
                                           prefixText: 'Rp ',
-                                          hintText: '5k / 15000',
+                                          hintText: '15.000',
                                           isDense: true,
                                         ),
                                       ),

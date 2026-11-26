@@ -4,6 +4,7 @@ import 'package:sakuin/core/db/app_database.dart';
 import 'package:sakuin/core/utils/amount_parser.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
+import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/features/category/category_providers.dart';
 import 'package:sakuin/features/recurring/recurring_service.dart';
 import 'package:sakuin/features/wallet/wallet_providers.dart';
@@ -160,10 +161,12 @@ class _RecurringFormSheetState extends ConsumerState<RecurringFormSheet> {
             const SizedBox(height: 12),
             TextField(
               controller: _amountCtrl,
+              keyboardType: TextInputType.number,
+              inputFormatters: [ThousandsSeparatorInputFormatter()],
               decoration: const InputDecoration(
                 labelText: 'Nominal',
                 prefixText: 'Rp ',
-                hintText: 'Contoh: 350k atau 5jt',
+                hintText: '350.000',
               ),
             ),
             const SizedBox(height: 12),

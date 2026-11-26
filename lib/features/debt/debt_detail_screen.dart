@@ -7,6 +7,7 @@ import 'package:sakuin/core/utils/amount_parser.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/utils/haptics.dart';
+import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/features/debt/debt_form_sheet.dart';
 import 'package:sakuin/features/debt/debt_providers.dart';
@@ -60,6 +61,8 @@ class DebtDetailScreen extends ConsumerWidget {
                 TextField(
                   controller: amountCtrl,
                   autofocus: true,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [ThousandsSeparatorInputFormatter()],
                   decoration: const InputDecoration(
                     labelText: 'Nominal bayar',
                     prefixText: 'Rp ',

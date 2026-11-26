@@ -8,6 +8,7 @@ import 'package:sakuin/core/utils/amount_parser.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/utils/haptics.dart';
+import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
 import 'package:sakuin/features/wallet/wallet_providers.dart';
@@ -314,22 +315,24 @@ class _TransferSheetState extends ConsumerState<TransferSheet> {
               const SizedBox(height: 14),
               TextField(
                 controller: _amountCtrl,
-                keyboardType: TextInputType.text,
+                keyboardType: TextInputType.number,
+                inputFormatters: [ThousandsSeparatorInputFormatter()],
                 decoration: const InputDecoration(
                   labelText: 'Nominal transfer',
                   prefixText: 'Rp ',
-                  hintText: 'Contoh: 200k atau 1,5jt',
+                  hintText: '200.000',
                 ),
               ),
               if (!isSameWallet) ...[
                 const SizedBox(height: 12),
                 TextField(
                   controller: _feeCtrl,
-                  keyboardType: TextInputType.text,
+                  keyboardType: TextInputType.number,
+                  inputFormatters: [ThousandsSeparatorInputFormatter()],
                   decoration: const InputDecoration(
                     labelText: 'Biaya admin (opsional)',
                     prefixText: 'Rp ',
-                    hintText: 'Contoh: 2500 atau 6,5k',
+                    hintText: '2.500',
                   ),
                 ),
                 const SizedBox(height: 12),

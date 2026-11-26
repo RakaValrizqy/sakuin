@@ -9,6 +9,7 @@ import 'package:sakuin/core/utils/amount_parser.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/utils/haptics.dart';
+import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
 import 'package:sakuin/features/transaction/widgets/custom_keypad.dart';
@@ -879,10 +880,12 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                     const SizedBox(height: 12),
                     TextField(
                       controller: _feeCtrl,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [ThousandsSeparatorInputFormatter()],
                       decoration: const InputDecoration(
                         labelText: 'Biaya admin transfer (opsional)',
                         prefixText: 'Rp ',
-                        hintText: '0 (mis. 2500 atau 6,5k)',
+                        hintText: '2.500',
                       ),
                     ),
                   ],
