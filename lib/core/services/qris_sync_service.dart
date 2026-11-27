@@ -301,35 +301,47 @@ class QrisSyncService {
     return wallets.isNotEmpty ? wallets.first.wallet.id : null;
   }
 
-  /// Konfirmasi 1 ketukan dari antrean Review -> simpan sebagai pengeluaran.
+  /// Konfirmasi 1 ketukan dari antrean Review -> simpan sebagai pengeluaran atau pemasukan,
+  /// sekaligus melatih pasangan Merchant <-> Item, Kategori, Dompet, & Pos Budget otomatis.
   Future<void> confirmDraftAsSingle(
     ImportedQrisDraft draft, {
     required int walletId,
     int? categoryId,
     int? pocketId,
     String? itemName,
+    String? merchantName,
   }) async {
+    final txType = draft.txType == 'income' ? 'income' : 'expense';
     final fallbackCat =
         categoryId ??
-        await _db.findCategoryIdByName('Makanan & Minuman', 'expense') ??
-        await _db.findCategoryIdByName('Lainnya', 'expense');
+        (txType == 'income'
+            ? (await _db.findCategoryIdByName('Lainnya', 'income') ??
+                  await _db.findCategoryIdByName('Bonus', 'income'))
+            : (await _db.findCategoryIdByName('Makanan & Minuman', 'expense') ??
+                  await _db.findCategoryIdByName('Lainnya', 'expense')));
+    final effectiveMerchant =
+        (merchantName != null && merchantName.trim().isNotEmpty)
+        ? merchantName.trim()
+        : draft.merchantName.trim();
+    final isGenericMerchant =
+        effectiveMerchant.toLowerCase() == 'pembayaran qris' ||
+        effectiveMerchant.toLowerCase().startsWith('transaksi ') ||
+        effectiveMerchant.toLowerCase().startsWith('dana masuk ');
     final finalItemName = (itemName != null && itemName.trim().isNotEmpty)
         ? itemName.trim()
-        : draft.merchantName;
-    final noteBase = 'QRIS ${draft.bankName}';
-    final note =
-        (finalItemName.toLowerCase() != draft.merchantName.toLowerCase() &&
-            draft.merchantName.toLowerCase() != 'pembayaran qris')
-        ? '$noteBase • ${draft.merchantName}'
-        : noteBase;
+        : effectiveMerchant;
+    final noteBase = txType == 'income'
+        ? 'Notifikasi Masuk ${draft.bankName}'
+        : 'QRIS ${draft.bankName}';
     await _db.saveTransactionWithMemory(
-      type: 'expense',
+      type: txType,
       amount: draft.amount,
       walletId: walletId,
       categoryId: fallbackCat,
       pocketId: pocketId,
       itemName: finalItemName,
-      note: note,
+      merchantName: isGenericMerchant ? null : effectiveMerchant,
+      note: noteBase,
       externalRef: draft.emailUid,
       occurredAt: DateTime.fromMillisecondsSinceEpoch(draft.occurredAt)
           .toLocal(),

@@ -92,6 +92,7 @@ class Transactions extends Table {
   IntColumn get fee => integer().withDefault(const Constant(0))();
   TextColumn get note => text().withDefault(const Constant(''))();
   TextColumn get itemName => text().nullable()();
+  TextColumn get merchantName => text().nullable()();
   TextColumn get splitGroupId => text().nullable()();
   TextColumn get externalRef => text().nullable()();
   IntColumn get occurredAt => integer()(); // UTC epoch millis
@@ -113,6 +114,8 @@ class ImportedQrisDrafts extends Table {
   IntColumn get suggestedWalletId =>
       integer().nullable().references(Wallets, #id)();
   TextColumn get rawSnippet => text().withDefault(const Constant(''))();
+  TextColumn get txType =>
+      text().withDefault(const Constant('expense'))(); // expense | income
   TextColumn get status => text().withDefault(
     const Constant('pending'),
   )(); // pending | confirmed | dismissed
@@ -129,6 +132,7 @@ class ItemMemory extends Table {
   TextColumn get displayName => text()();
   TextColumn get type => text()(); // income | expense
   IntColumn get lastAmount => integer()();
+  TextColumn get lastMerchantName => text().nullable()();
   IntColumn get lastCategoryId =>
       integer().nullable().references(Categories, #id)();
   IntColumn get lastWalletId => integer().nullable().references(Wallets, #id)();
@@ -138,6 +142,24 @@ class ItemMemory extends Table {
   IntColumn get useCount => integer().withDefault(const Constant(1))();
   IntColumn get lastUsedAt => integer()();
   BoolColumn get isPinned => boolean().withDefault(const Constant(false))();
+}
+
+@TableIndex(name: 'idx_merchant_memory_rank', columns: {#useCount, #lastUsedAt})
+class MerchantMemory extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get merchantNormalized => text().unique()();
+  TextColumn get displayMerchant => text()();
+  TextColumn get type => text().withDefault(const Constant('expense'))();
+  TextColumn get lastItemName => text().nullable()();
+  IntColumn get lastAmount => integer()();
+  IntColumn get lastCategoryId =>
+      integer().nullable().references(Categories, #id)();
+  IntColumn get lastWalletId => integer().nullable().references(Wallets, #id)();
+  IntColumn get lastPocketId =>
+      integer().nullable().references(WalletPockets, #id)();
+  TextColumn get lastNote => text().withDefault(const Constant(''))();
+  IntColumn get useCount => integer().withDefault(const Constant(1))();
+  IntColumn get lastUsedAt => integer()();
 }
 
 class RecurringRules extends Table {
@@ -350,6 +372,7 @@ class SplitComponentInput {
     Categories,
     Transactions,
     ItemMemory,
+    MerchantMemory,
     RecurringRules,
     People,
     Debts,
@@ -365,7 +388,7 @@ class AppDatabase extends _$AppDatabase {
   /// dan tambahkan langkah migrasi non-destruktif di [migration.onUpgrade]
   /// agar update APK tanpa uninstall tetap mempertahankan seluruh data pengguna.
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -409,6 +432,15 @@ class AppDatabase extends _$AppDatabase {
         );
         await customStatement(
           'CREATE INDEX IF NOT EXISTS idx_qris_drafts_status ON imported_qris_drafts (status)',
+        );
+      }
+      if (from < 4) {
+        await m.addColumn(transactions, transactions.merchantName);
+        await m.addColumn(itemMemory, itemMemory.lastMerchantName);
+        await m.addColumn(importedQrisDrafts, importedQrisDrafts.txType);
+        await m.createTable(merchantMemory);
+        await customStatement(
+          'CREATE INDEX IF NOT EXISTS idx_merchant_memory_rank ON merchant_memory (use_count, last_used_at)',
         );
       }
     },
@@ -819,6 +851,7 @@ FROM wallet_pockets p
     int fee = 0,
     String note = '',
     String? itemName,
+    String? merchantName,
     String? splitGroupId,
     String? externalRef,
     required DateTime occurredAt,
@@ -832,6 +865,10 @@ FROM wallet_pockets p
     final cleanItem = (trimmedItem == null || trimmedItem.isEmpty)
         ? null
         : trimmedItem;
+    final trimmedMerchant = merchantName?.trim();
+    final cleanMerchant = (trimmedMerchant == null || trimmedMerchant.isEmpty)
+        ? null
+        : trimmedMerchant;
 
     return transaction(() async {
       late int txId;
@@ -850,6 +887,7 @@ FROM wallet_pockets p
             fee: Value(fee),
             note: Value(note.trim()),
             itemName: Value(cleanItem),
+            merchantName: Value(cleanMerchant),
             splitGroupId: splitGroupId != null
                 ? Value(splitGroupId)
                 : const Value.absent(),
@@ -875,6 +913,7 @@ FROM wallet_pockets p
             fee: Value(fee),
             note: Value(note.trim()),
             itemName: Value(cleanItem),
+            merchantName: Value(cleanMerchant),
             splitGroupId: Value(splitGroupId),
             externalRef: Value(externalRef),
             occurredAt: occurredMillis,
@@ -885,18 +924,31 @@ FROM wallet_pockets p
         );
       }
 
-      if (updateItemMemory &&
-          cleanItem != null &&
-          (type == 'income' || type == 'expense')) {
-        await upsertItemMemory(
-          displayName: cleanItem,
-          type: type,
-          amount: amount,
-          categoryId: categoryId,
-          walletId: walletId,
-          pocketId: pocketId,
-          note: note.trim(),
-        );
+      if (updateItemMemory && (type == 'income' || type == 'expense')) {
+        if (cleanItem != null) {
+          await upsertItemMemory(
+            displayName: cleanItem,
+            type: type,
+            amount: amount,
+            merchantName: cleanMerchant,
+            categoryId: categoryId,
+            walletId: walletId,
+            pocketId: pocketId,
+            note: note.trim(),
+          );
+        }
+        if (cleanMerchant != null) {
+          await upsertMerchantMemory(
+            displayMerchant: cleanMerchant,
+            type: type,
+            itemName: cleanItem,
+            amount: amount,
+            categoryId: categoryId,
+            walletId: walletId,
+            pocketId: pocketId,
+            note: note.trim(),
+          );
+        }
       }
 
       return txId;
@@ -1026,6 +1078,7 @@ FROM wallet_pockets p
     required DateTime occurredAt,
     int? suggestedWalletId,
     String rawSnippet = '',
+    String txType = 'expense',
     String status = 'pending',
   }) async {
     if (await hasImportedEmailUid(emailUid)) return null;
@@ -1040,6 +1093,7 @@ FROM wallet_pockets p
         occurredAt: occurredAt.toUtc().millisecondsSinceEpoch,
         suggestedWalletId: Value(suggestedWalletId),
         rawSnippet: Value(rawSnippet),
+        txType: Value(txType),
         status: Value(status),
         createdAt: DateTime.now().toUtc().millisecondsSinceEpoch,
       ),
@@ -1066,6 +1120,7 @@ FROM wallet_pockets p
         fee: Value(tx.fee),
         note: Value(tx.note),
         itemName: Value(tx.itemName),
+        merchantName: Value(tx.merchantName),
         splitGroupId: Value(tx.splitGroupId),
         externalRef: Value(tx.externalRef),
         occurredAt: Value(tx.occurredAt),
@@ -1132,8 +1187,9 @@ FROM wallet_pockets p
     if (searchQuery != null && searchQuery.trim().isNotEmpty) {
       final like = '%${searchQuery.trim().toLowerCase()}%';
       conditions.add(
-        '(LOWER(COALESCE(t.item_name, \'\')) LIKE ? OR LOWER(t.note) LIKE ? OR LOWER(COALESCE(c.name, \'\')) LIKE ? OR LOWER(w.name) LIKE ?)',
+        '(LOWER(COALESCE(t.item_name, \'\')) LIKE ? OR LOWER(COALESCE(t.merchant_name, \'\')) LIKE ? OR LOWER(t.note) LIKE ? OR LOWER(COALESCE(c.name, \'\')) LIKE ? OR LOWER(w.name) LIKE ?)',
       );
+      vars.add(Variable.withString(like));
       vars.add(Variable.withString(like));
       vars.add(Variable.withString(like));
       vars.add(Variable.withString(like));
@@ -1150,7 +1206,7 @@ FROM wallet_pockets p
         t.id AS t_id, t.type AS t_type, t.amount AS t_amount, t.category_id AS t_category_id,
         t.wallet_id AS t_wallet_id, t.to_wallet_id AS t_to_wallet_id,
         t.pocket_id AS t_pocket_id, t.to_pocket_id AS t_to_pocket_id, t.fee AS t_fee,
-        t.note AS t_note, t.item_name AS t_item_name,
+        t.note AS t_note, t.item_name AS t_item_name, t.merchant_name AS t_merchant_name,
         t.split_group_id AS t_split_group_id, t.external_ref AS t_external_ref,
         t.occurred_at AS t_occurred_at,
         t.day_key AS t_day_key, t.created_at AS t_created_at, t.updated_at AS t_updated_at,
@@ -1187,7 +1243,7 @@ FROM wallet_pockets p
         t.id AS t_id, t.type AS t_type, t.amount AS t_amount, t.category_id AS t_category_id,
         t.wallet_id AS t_wallet_id, t.to_wallet_id AS t_to_wallet_id,
         t.pocket_id AS t_pocket_id, t.to_pocket_id AS t_to_pocket_id, t.fee AS t_fee,
-        t.note AS t_note, t.item_name AS t_item_name,
+        t.note AS t_note, t.item_name AS t_item_name, t.merchant_name AS t_merchant_name,
         t.split_group_id AS t_split_group_id, t.external_ref AS t_external_ref,
         t.occurred_at AS t_occurred_at,
         t.day_key AS t_day_key, t.created_at AS t_created_at, t.updated_at AS t_updated_at,
@@ -1217,6 +1273,74 @@ FROM wallet_pockets p
     ).watch().map((rows) => rows.map(_mapTransactionDetailRow).toList());
   }
 
+  /// Ambil transaksi yang melibatkan salah satu pos budget pada [pocketIds]
+  /// (pengeluaran, pemasukan, atau transfer masuk/keluar pos tersebut).
+  Future<List<TransactionDetail>> fetchTransactionsForPocketIds(
+    Set<int> pocketIds, {
+    int? startDayKey,
+    int? endDayKey,
+    int limit = 200,
+  }) async {
+    if (pocketIds.isEmpty) return const [];
+    final placeholders = List.filled(pocketIds.length, '?').join(',');
+    final conditions = <String>[
+      '(t.pocket_id IN ($placeholders) OR t.to_pocket_id IN ($placeholders))',
+    ];
+    final vars = <Variable>[
+      for (final id in pocketIds) Variable.withInt(id),
+      for (final id in pocketIds) Variable.withInt(id),
+    ];
+    if (startDayKey != null) {
+      conditions.add('t.day_key >= ?');
+      vars.add(Variable.withInt(startDayKey));
+    }
+    if (endDayKey != null) {
+      conditions.add('t.day_key <= ?');
+      vars.add(Variable.withInt(endDayKey));
+    }
+    vars.add(Variable.withInt(limit));
+
+    final rows = await customSelect('''
+      SELECT
+        t.id AS t_id, t.type AS t_type, t.amount AS t_amount, t.category_id AS t_category_id,
+        t.wallet_id AS t_wallet_id, t.to_wallet_id AS t_to_wallet_id,
+        t.pocket_id AS t_pocket_id, t.to_pocket_id AS t_to_pocket_id, t.fee AS t_fee,
+        t.note AS t_note, t.item_name AS t_item_name, t.merchant_name AS t_merchant_name,
+        t.split_group_id AS t_split_group_id, t.external_ref AS t_external_ref,
+        t.occurred_at AS t_occurred_at,
+        t.day_key AS t_day_key, t.created_at AS t_created_at, t.updated_at AS t_updated_at,
+        w.id AS w_id, w.name AS w_name, w.type AS w_type, w.icon AS w_icon,
+        w.color AS w_color, w.initial_balance AS w_initial_balance,
+        w.include_in_total AS w_include_in_total, w.is_archived AS w_is_archived,
+        w.sort_order AS w_sort_order,
+        tw.id AS tw_id, tw.name AS tw_name, tw.type AS tw_type, tw.icon AS tw_icon,
+        tw.color AS tw_color, tw.initial_balance AS tw_initial_balance,
+        tw.include_in_total AS tw_include_in_total, tw.is_archived AS tw_is_archived,
+        tw.sort_order AS tw_sort_order,
+        c.id AS c_id, c.name AS c_name, c.type AS c_type, c.icon AS c_icon,
+        c.color AS c_color, c.sort_order AS c_sort_order, c.is_archived AS c_is_archived,
+        pk.name AS pk_name,
+        tpk.name AS tpk_name
+      FROM transactions t
+      INNER JOIN wallets w ON w.id = t.wallet_id
+      LEFT JOIN wallets tw ON tw.id = t.to_wallet_id
+      LEFT JOIN categories c ON c.id = t.category_id
+      LEFT JOIN wallet_pockets pk ON pk.id = t.pocket_id
+      LEFT JOIN wallet_pockets tpk ON tpk.id = t.to_pocket_id
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY t.occurred_at DESC, t.id DESC
+      LIMIT ?
+      ''', variables: vars).get();
+
+    return rows.map(_mapTransactionDetailRow).toList();
+  }
+
+  Future<void> updatePocketTargetAmount(int pocketId, int? targetAmount) async {
+    await (update(walletPockets)..where((p) => p.id.equals(pocketId))).write(
+      WalletPocketsCompanion(targetAmount: Value(targetAmount)),
+    );
+  }
+
   TransactionDetail _mapTransactionDetailRow(QueryRow r) {
     final tx = Transaction(
       id: r.read<int>('t_id'),
@@ -1230,6 +1354,7 @@ FROM wallet_pockets p
       fee: r.read<int>('t_fee'),
       note: r.read<String>('t_note'),
       itemName: r.readNullable<String>('t_item_name'),
+      merchantName: r.readNullable<String>('t_merchant_name'),
       splitGroupId: r.readNullable<String>('t_split_group_id'),
       externalRef: r.readNullable<String>('t_external_ref'),
       occurredAt: r.read<int>('t_occurred_at'),
@@ -1292,6 +1417,7 @@ FROM wallet_pockets p
     required String displayName,
     required String type,
     required int amount,
+    String? merchantName,
     int? categoryId,
     int? walletId,
     int? pocketId,
@@ -1300,6 +1426,10 @@ FROM wallet_pockets p
   }) async {
     final normalized = normalizeItemName(displayName);
     if (normalized.isEmpty) return;
+    final cleanMerchant = merchantName?.trim();
+    final effectiveMerchant = (cleanMerchant == null || cleanMerchant.isEmpty)
+        ? null
+        : cleanMerchant;
     final nowMillis = DateTime.now().toUtc().millisecondsSinceEpoch;
 
     final existing = await (select(
@@ -1312,6 +1442,9 @@ FROM wallet_pockets p
           displayName: Value(displayName.trim()),
           type: Value(type),
           lastAmount: Value(amount),
+          lastMerchantName: effectiveMerchant != null
+              ? Value(effectiveMerchant)
+              : const Value.absent(),
           lastCategoryId: Value(categoryId),
           lastWalletId: Value(walletId),
           lastPocketId: Value(pocketId),
@@ -1328,6 +1461,7 @@ FROM wallet_pockets p
           displayName: displayName.trim(),
           type: type,
           lastAmount: amount,
+          lastMerchantName: Value(effectiveMerchant),
           lastCategoryId: Value(categoryId),
           lastWalletId: Value(walletId),
           lastPocketId: Value(pocketId),
@@ -1338,6 +1472,121 @@ FROM wallet_pockets p
         ),
       );
     }
+  }
+
+  Future<void> upsertMerchantMemory({
+    required String displayMerchant,
+    required String type,
+    String? itemName,
+    required int amount,
+    int? categoryId,
+    int? walletId,
+    int? pocketId,
+    String note = '',
+  }) async {
+    final normalized = normalizeItemName(displayMerchant);
+    if (normalized.isEmpty) return;
+    final cleanItem = itemName?.trim();
+    final effectiveItem = (cleanItem == null || cleanItem.isEmpty)
+        ? null
+        : cleanItem;
+    final nowMillis = DateTime.now().toUtc().millisecondsSinceEpoch;
+
+    final existing = await (select(
+      merchantMemory,
+    )..where((m) => m.merchantNormalized.equals(normalized))).getSingleOrNull();
+
+    if (existing != null) {
+      await (update(
+        merchantMemory,
+      )..where((m) => m.id.equals(existing.id))).write(
+        MerchantMemoryCompanion(
+          displayMerchant: Value(displayMerchant.trim()),
+          type: Value(type),
+          lastItemName: effectiveItem != null
+              ? Value(effectiveItem)
+              : const Value.absent(),
+          lastAmount: Value(amount),
+          lastCategoryId: Value(categoryId),
+          lastWalletId: Value(walletId),
+          lastPocketId: Value(pocketId),
+          lastNote: Value(note),
+          useCount: Value(existing.useCount + 1),
+          lastUsedAt: Value(nowMillis),
+        ),
+      );
+    } else {
+      await into(merchantMemory).insert(
+        MerchantMemoryCompanion.insert(
+          merchantNormalized: normalized,
+          displayMerchant: displayMerchant.trim(),
+          type: Value(type),
+          lastItemName: Value(effectiveItem),
+          lastAmount: amount,
+          lastCategoryId: Value(categoryId),
+          lastWalletId: Value(walletId),
+          lastPocketId: Value(pocketId),
+          lastNote: Value(note),
+          useCount: const Value(1),
+          lastUsedAt: nowMillis,
+        ),
+      );
+    }
+  }
+
+  Future<List<MerchantMemoryData>> searchMerchantMemory(
+    String query, {
+    String? type,
+    int limit = 8,
+  }) async {
+    final normalized = normalizeItemName(query);
+    final q = select(merchantMemory);
+    if (type != null && (type == 'income' || type == 'expense')) {
+      q.where((m) => m.type.equals(type));
+    }
+    if (normalized.isNotEmpty) {
+      q.where((m) => m.merchantNormalized.like('%$normalized%'));
+    }
+    q.orderBy([
+      (m) => OrderingTerm.desc(m.useCount),
+      (m) => OrderingTerm.desc(m.lastUsedAt),
+    ]);
+    q.limit(limit);
+    return q.get();
+  }
+
+  Stream<List<MerchantMemoryData>> watchAllMerchantMemory() {
+    return (select(merchantMemory)..orderBy([
+          (m) => OrderingTerm.desc(m.useCount),
+          (m) => OrderingTerm.desc(m.lastUsedAt),
+        ]))
+        .watch();
+  }
+
+  Future<MerchantMemoryData?> findMerchantMemoryForName(
+    String merchantName, {
+    String? type,
+  }) async {
+    final normalized = normalizeItemName(merchantName);
+    if (normalized.isEmpty) return null;
+    final exactQ = select(merchantMemory)
+      ..where((m) => m.merchantNormalized.equals(normalized));
+    if (type != null) {
+      exactQ.where((m) => m.type.equals(type));
+    }
+    exactQ.limit(1);
+    final exact = await exactQ.getSingleOrNull();
+    if (exact != null) return exact;
+
+    final all = await searchMerchantMemory('', type: type, limit: 100);
+    for (final m in all) {
+      if (m.merchantNormalized.length >= 3 &&
+          (normalized.contains(m.merchantNormalized) ||
+              m.merchantNormalized.contains(normalized))) {
+        return m;
+      }
+    }
+    return null;
   }
 
   Future<List<ItemMemoryData>> searchItemMemory(

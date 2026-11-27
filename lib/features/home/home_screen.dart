@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sakuin/core/constants/app_colors.dart';
 import 'package:sakuin/core/db/app_database.dart';
 import 'package:sakuin/core/db/db_provider.dart';
+import 'package:sakuin/core/services/auto_backup_service.dart';
 import 'package:sakuin/core/services/qris_sync_service.dart';
 import 'package:sakuin/core/services/settings_service.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
@@ -11,10 +12,12 @@ import 'package:sakuin/core/utils/haptics.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/features/debt/debt_list_screen.dart';
 import 'package:sakuin/features/debt/debt_providers.dart';
+import 'package:sakuin/features/home/quick_natural_input_card.dart';
 import 'package:sakuin/features/home/safe_to_spend_card.dart';
 import 'package:sakuin/features/qris/qris_inbox_screen.dart';
 import 'package:sakuin/features/receipt/receipt_scanner_screen.dart';
 import 'package:sakuin/features/recurring/recurring_service.dart';
+import 'package:sakuin/features/settings/backup_screen.dart';
 import 'package:sakuin/features/transaction/transaction_form_sheet.dart';
 import 'package:sakuin/features/transaction/transaction_list_screen.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
@@ -172,7 +175,14 @@ class HomeScreen extends ConsumerWidget {
 
           // 1a. Batas Aman Belanja Harian (Safe-to-Spend)
           const SafeToSpendCard(),
+          const SizedBox(height: 10),
+
+          // 1a2. Catat Cepat 1 Baris (Quick Natural Input 100% Offline)
+          const QuickNaturalInputCard(),
           const SizedBox(height: 12),
+
+          // 1a3. Pengingat Halus Backup Jika >14 Hari & Auto-Backup Mati
+          const _BackupOverdueBanner(),
 
           // 1b. Antrean Email QRIS dari Gmail Menunggu Review
           if (pendingQris.isNotEmpty) ...[
@@ -661,6 +671,111 @@ class _BalanceSummaryCard extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _BackupOverdueBanner extends ConsumerStatefulWidget {
+  const _BackupOverdueBanner();
+
+  @override
+  ConsumerState<_BackupOverdueBanner> createState() =>
+      _BackupOverdueBannerState();
+}
+
+class _BackupOverdueBannerState extends ConsumerState<_BackupOverdueBanner> {
+  bool _dismissed = false;
+  bool _checked = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkDismissed();
+  }
+
+  Future<void> _checkDismissed() async {
+    final dismissed = await ref
+        .read(autoBackupServiceProvider)
+        .isReminderDismissedToday();
+    if (mounted) {
+      setState(() {
+        _dismissed = dismissed;
+        _checked = true;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_checked || _dismissed) return const SizedBox.shrink();
+
+    final lastBackupMillis = ref.watch(
+      settingsProvider.select((s) => s.lastBackupMillis),
+    );
+    final autoCfg = ref.watch(autoBackupConfigProvider).valueOrNull;
+    final wallets =
+        ref.watch(walletsWithBalancesProvider).valueOrNull ?? const [];
+    if (autoCfg == null || wallets.isEmpty) return const SizedBox.shrink();
+
+    final overdue = AutoBackupService.isBackupOverdue(
+      lastBackupMillis: lastBackupMillis,
+      autoBackupEnabled: autoCfg.enabled,
+      now: DateTime.now(),
+    );
+    if (!overdue) return const SizedBox.shrink();
+
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Card(
+        color: cs.tertiaryContainer.withValues(alpha: 0.4),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
+          child: Row(
+            children: [
+              Icon(Icons.backup_outlined, color: cs.tertiary, size: 22),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      lastBackupMillis == null
+                          ? 'Belum pernah backup data'
+                          : 'Sudah >14 hari belum backup',
+                      style: tt.labelLarge?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      'Aktifkan Backup Otomatis Lokal agar data tetap aman.',
+                      style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(
+                  context,
+                ).push(MaterialPageRoute(builder: (_) => const BackupScreen())),
+                child: const Text('Atur'),
+              ),
+              IconButton(
+                tooltip: 'Tutup hari ini',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.close_rounded, size: 18),
+                onPressed: () async {
+                  await ref
+                      .read(autoBackupServiceProvider)
+                      .dismissReminderToday();
+                  if (mounted) setState(() => _dismissed = true);
+                },
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

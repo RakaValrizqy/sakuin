@@ -10,10 +10,12 @@ class NotificationCaptureStatus {
   const NotificationCaptureStatus({
     required this.enabledInApp,
     required this.osPermissionGranted,
+    this.captureIncome = true,
   });
 
   final bool enabledInApp;
   final bool osPermissionGranted;
+  final bool captureIncome;
 
   bool get isActive => enabledInApp && osPermissionGranted;
 }
@@ -23,6 +25,7 @@ class NotificationCaptureService {
 
   static const _channel = MethodChannel('id.rakavalrizqy.sakuin/notif_capture');
   static const _kEnabledPref = 'sakuin_notif_capture_enabled';
+  static const _kCaptureIncomePref = 'sakuin_notif_capture_income';
 
   final Ref _ref;
   AppDatabase get _db => _ref.read(appDatabaseProvider);
@@ -69,9 +72,26 @@ class NotificationCaptureService {
     } catch (_) {}
   }
 
+  Future<bool> isCaptureIncomeEnabled() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool(_kCaptureIncomePref) ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  Future<void> setCaptureIncomeEnabled(bool enabled) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_kCaptureIncomePref, enabled);
+    } catch (_) {}
+  }
+
   Future<NotificationCaptureStatus> getStatus() async {
     final enabled = await isEnabledInApp();
     final granted = await isOsPermissionGranted();
+    final captureIncome = await isCaptureIncomeEnabled();
     // Pastikan flag native selalu sinkron dengan preferensi aplikasi
     if (enabled) {
       try {
@@ -83,6 +103,7 @@ class NotificationCaptureService {
     return NotificationCaptureStatus(
       enabledInApp: enabled,
       osPermissionGranted: granted,
+      captureIncome: captureIncome,
     );
   }
 
@@ -105,6 +126,7 @@ class NotificationCaptureService {
     if (rawItems.isEmpty) return 0;
 
     final qrisCfg = await _ref.read(qrisSyncServiceProvider).loadConfig();
+    final captureIncome = await isCaptureIncomeEnabled();
     final wallets = await _db.getWalletsWithBalances();
     var added = 0;
 
@@ -130,6 +152,7 @@ class NotificationCaptureService {
         title: title,
         text: text,
         timestamp: ts,
+        captureIncome: captureIncome,
       );
       if (parsed == null) continue;
 
@@ -149,6 +172,7 @@ class NotificationCaptureService {
         occurredAt: parsed.occurredAt,
         suggestedWalletId: matchedWalletId,
         rawSnippet: parsed.snippet,
+        txType: parsed.txType,
         status: 'pending',
       );
       if (draftId != null) added++;

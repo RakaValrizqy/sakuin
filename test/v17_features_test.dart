@@ -268,6 +268,7 @@ void main() {
           fee: fee,
           note: '',
           itemName: null,
+          merchantName: null,
           splitGroupId: null,
           externalRef: null,
           occurredAt: 0,

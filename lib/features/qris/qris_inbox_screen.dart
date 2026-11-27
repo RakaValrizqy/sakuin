@@ -14,6 +14,8 @@ import 'package:sakuin/features/category/category_form_sheet.dart';
 import 'package:sakuin/features/category/category_providers.dart';
 import 'package:sakuin/features/receipt/split_bill_screen.dart';
 import 'package:sakuin/features/transaction/split_transaction_sheet.dart';
+import 'package:sakuin/features/transaction/transaction_providers.dart';
+import 'package:sakuin/features/wallet/income_allocation_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_providers.dart';
 
 class QrisInboxScreen extends ConsumerStatefulWidget {
@@ -323,11 +325,85 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
     );
   }
 
+  MerchantMemoryData? _findMemoryForDraft(
+    ImportedQrisDraft draft,
+    List<MerchantMemoryData> memories,
+  ) {
+    final norm = AppDatabase.normalizeItemName(draft.merchantName);
+    if (norm.isEmpty ||
+        norm == 'pembayaran qris' ||
+        norm.startsWith('transaksi ') ||
+        norm.startsWith('dana masuk ')) {
+      return null;
+    }
+    final txType = draft.txType == 'income' ? 'income' : 'expense';
+    final typed = memories.where((m) => m.type == txType).toList();
+    for (final m in typed) {
+      if (m.merchantNormalized == norm) return m;
+    }
+    for (final m in typed) {
+      if (m.merchantNormalized.length >= 3 &&
+          (norm.contains(m.merchantNormalized) ||
+              m.merchantNormalized.contains(norm))) {
+        return m;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _quickConfirmWithMemory(
+    ImportedQrisDraft draft,
+    MerchantMemoryData mem,
+    List<WalletWithBalance> wallets,
+    List<PocketWithBalance> allPockets,
+  ) async {
+    if (wallets.isEmpty) return;
+    final walletId =
+        (mem.lastWalletId != null &&
+            wallets.any((w) => w.wallet.id == mem.lastWalletId))
+        ? mem.lastWalletId!
+        : ((draft.suggestedWalletId != null &&
+                  wallets.any((w) => w.wallet.id == draft.suggestedWalletId))
+              ? draft.suggestedWalletId!
+              : wallets.first.wallet.id);
+    final pocketId =
+        (mem.lastPocketId != null &&
+            allPockets.any(
+              (p) =>
+                  p.pocket.id == mem.lastPocketId &&
+                  p.pocket.walletId == walletId,
+            ))
+        ? mem.lastPocketId
+        : null;
+
+    await ref
+        .read(qrisSyncServiceProvider)
+        .confirmDraftAsSingle(
+          draft,
+          walletId: walletId,
+          categoryId: mem.lastCategoryId,
+          pocketId: pocketId,
+          itemName: mem.lastItemName ?? draft.merchantName,
+          merchantName: mem.displayMerchant,
+        );
+    AppHaptics.medium(ref.read(settingsProvider).hapticsEnabled);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Tersimpan cepat: ${mem.lastItemName ?? mem.displayMerchant} (${CurrencyFormatter.format(draft.amount)})',
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _confirmSingleDialog(
     ImportedQrisDraft draft,
     List<WalletWithBalance> wallets,
     List<PocketWithBalance> allPockets,
-    List<Category> expenseCategories,
+    List<Category> typeCategories,
+    MerchantMemoryData? matchedMemory,
   ) async {
     if (wallets.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -336,28 +412,52 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
       return;
     }
 
+    final isIncome = draft.txType == 'income';
     int walletId =
-        (draft.suggestedWalletId != null &&
-            wallets.any((w) => w.wallet.id == draft.suggestedWalletId))
-        ? draft.suggestedWalletId!
-        : wallets.first.wallet.id;
-    int? pocketId;
-    var modalCategories = List<Category>.from(expenseCategories);
-    int? categoryId = modalCategories.isNotEmpty
-        ? modalCategories.first.id
+        (matchedMemory?.lastWalletId != null &&
+            wallets.any((w) => w.wallet.id == matchedMemory!.lastWalletId))
+        ? matchedMemory!.lastWalletId!
+        : ((draft.suggestedWalletId != null &&
+                  wallets.any((w) => w.wallet.id == draft.suggestedWalletId))
+              ? draft.suggestedWalletId!
+              : wallets.first.wallet.id);
+    int? pocketId =
+        (matchedMemory?.lastPocketId != null &&
+            allPockets.any(
+              (p) =>
+                  p.pocket.id == matchedMemory!.lastPocketId &&
+                  p.pocket.walletId == walletId,
+            ))
+        ? matchedMemory!.lastPocketId
         : null;
+    var modalCategories = List<Category>.from(typeCategories);
+    int? categoryId =
+        (matchedMemory?.lastCategoryId != null &&
+            modalCategories.any((c) => c.id == matchedMemory!.lastCategoryId))
+        ? matchedMemory!.lastCategoryId
+        : (modalCategories.isNotEmpty ? modalCategories.first.id : null);
+    bool splitIncomeAfter = isIncome && pocketId == null;
 
     final isGenericMerchant =
         draft.merchantName.trim().toLowerCase() == 'pembayaran qris' ||
-        draft.merchantName.trim().toLowerCase().startsWith('transaksi ');
+        draft.merchantName.trim().toLowerCase().startsWith('transaksi ') ||
+        draft.merchantName.trim().toLowerCase().startsWith('dana masuk ');
     final itemCtrl = TextEditingController(
-      text: isGenericMerchant ? '' : draft.merchantName,
+      text: matchedMemory?.lastItemName?.trim().isNotEmpty == true
+          ? matchedMemory!.lastItemName!
+          : (isGenericMerchant ? '' : draft.merchantName),
+    );
+    final merchantCtrl = TextEditingController(
+      text:
+          matchedMemory?.displayMerchant ??
+          (isGenericMerchant ? '' : draft.merchantName),
     );
     final itemHistory = await ref
         .read(appDatabaseProvider)
-        .searchItemMemory('', type: 'expense', limit: 30);
+        .searchItemMemory('', type: isIncome ? 'income' : 'expense', limit: 30);
     if (!mounted) {
       itemCtrl.dispose();
+      merchantCtrl.dispose();
       return;
     }
 
@@ -399,7 +499,9 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Simpan Pengeluaran QRIS',
+                  isIncome
+                      ? 'Simpan Pemasukan Notifikasi'
+                      : 'Simpan Pengeluaran QRIS',
                   style: Theme.of(ctx).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 6),
@@ -410,7 +512,7 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                 const SizedBox(height: 4),
                 AmountText(
                   amount: draft.amount,
-                  type: 'expense',
+                  type: isIncome ? 'income' : 'expense',
                   style: Theme.of(ctx).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 14),
@@ -420,7 +522,9 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                   onChanged: (_) => setModalState(() {}),
                   decoration: InputDecoration(
                     labelText: 'Nama item / transaksi',
-                    hintText: 'Contoh: Kopi susu, Makan siang, Parkir',
+                    hintText: isIncome
+                        ? 'Contoh: Gaji, Transfer teman, Reimburse'
+                        : 'Contoh: Kopi susu, Makan siang, Parkir',
                     prefixIcon: const Icon(Icons.edit_note_rounded),
                     suffixIcon: itemCtrl.text.isNotEmpty
                         ? IconButton(
@@ -455,6 +559,11 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                             itemCtrl.selection = TextSelection.collapsed(
                               offset: item.displayName.length,
                             );
+                            if (item.lastMerchantName != null &&
+                                item.lastMerchantName!.trim().isNotEmpty &&
+                                merchantCtrl.text.trim().isEmpty) {
+                              merchantCtrl.text = item.lastMerchantName!.trim();
+                            }
                             if (item.lastCategoryId != null &&
                                 modalCategories.any(
                                   (c) => c.id == item.lastCategoryId,
@@ -473,7 +582,21 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                     ),
                   ),
                 ],
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: merchantCtrl,
+                  textCapitalization: TextCapitalization.words,
+                  decoration: InputDecoration(
+                    labelText: isIncome
+                        ? 'Pengirim / sumber (opsional)'
+                        : 'Nama merchant / toko (diingat otomatis)',
+                    hintText: isIncome
+                        ? 'Contoh: Nama pengirim'
+                        : 'Contoh: Kopi Kenangan, Indomaret',
+                    prefixIcon: const Icon(Icons.storefront_rounded),
+                  ),
+                ),
+                const SizedBox(height: 10),
                 DropdownButtonFormField<int>(
                   initialValue: walletId,
                   decoration: const InputDecoration(labelText: 'Dompet / Saku'),
@@ -509,8 +632,22 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                           child: Text(p.pocket.name),
                         ),
                     ],
-                    onChanged: (v) => setModalState(() => pocketId = v),
+                    onChanged: (v) => setModalState(() {
+                      pocketId = v;
+                      if (v != null) splitIncomeAfter = false;
+                    }),
                   ),
+                  if (isIncome && pocketId == null)
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      title: const Text(
+                        'Bagi pemasukan per persentase (%) ke pos budget',
+                      ),
+                      value: splitIncomeAfter,
+                      onChanged: (v) =>
+                          setModalState(() => splitIncomeAfter = v ?? false),
+                    ),
                 ],
                 const SizedBox(height: 10),
                 Row(
@@ -547,12 +684,14 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                       onPressed: () async {
                         final newId = await showCategoryFormSheet(
                           ctx,
-                          initialType: 'expense',
+                          initialType: isIncome ? 'income' : 'expense',
                         );
                         if (newId == null) return;
                         final refreshed = await ref
                             .read(appDatabaseProvider)
-                            .getCategoriesByRecentUsage('expense');
+                            .getCategoriesByRecentUsage(
+                              isIncome ? 'income' : 'expense',
+                            );
                         setModalState(() {
                           modalCategories = refreshed;
                           if (modalCategories.any((c) => c.id == newId)) {
@@ -569,7 +708,9 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                   child: FilledButton.icon(
                     onPressed: () => Navigator.pop(ctx, true),
                     icon: const Icon(Icons.check_rounded),
-                    label: const Text('Simpan Pengeluaran'),
+                    label: Text(
+                      isIncome ? 'Simpan Pemasukan' : 'Simpan Pengeluaran',
+                    ),
                   ),
                 ),
               ],
@@ -580,7 +721,9 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
     );
 
     final chosenItemName = itemCtrl.text.trim();
+    final chosenMerchant = merchantCtrl.text.trim();
     itemCtrl.dispose();
+    merchantCtrl.dispose();
 
     if (confirmed == true) {
       await ref
@@ -591,8 +734,34 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
             categoryId: categoryId,
             pocketId: pocketId,
             itemName: chosenItemName.isEmpty ? null : chosenItemName,
+            merchantName: chosenMerchant.isEmpty ? null : chosenMerchant,
           );
       AppHaptics.medium(ref.read(settingsProvider).hapticsEnabled);
+
+      if (mounted && isIncome && pocketId == null && splitIncomeAfter) {
+        final walletPockets = allPockets
+            .where((p) => p.pocket.walletId == walletId)
+            .toList();
+        if (walletPockets.isNotEmpty) {
+          final walletName =
+              wallets
+                  .where((w) => w.wallet.id == walletId)
+                  .firstOrNull
+                  ?.wallet
+                  .name ??
+              'Saku';
+          await showIncomePercentageAllocationSheet(
+            context,
+            walletId: walletId,
+            walletName: walletName,
+            incomeAmount: draft.amount,
+            pockets: walletPockets,
+            incomeTitle: chosenItemName.isEmpty
+                ? draft.merchantName
+                : chosenItemName,
+          );
+        }
+      }
     }
   }
 
@@ -665,6 +834,10 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
         ref.watch(allActivePocketsProvider).valueOrNull ?? const [];
     final expenseCats =
         ref.watch(expenseCategoriesProvider).valueOrNull ?? const [];
+    final incomeCats =
+        ref.watch(incomeCategoriesProvider).valueOrNull ?? const [];
+    final merchantMemories =
+        ref.watch(merchantMemoryListProvider).valueOrNull ?? const [];
 
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
@@ -753,6 +926,27 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                               }
                             },
                           ),
+                          if (notifStatus?.isActive == true) ...[
+                            const Divider(height: 1),
+                            SwitchListTile(
+                              dense: true,
+                              title: const Text(
+                                'Tangkap juga notifikasi dana masuk',
+                              ),
+                              subtitle: const Text(
+                                'Transfer masuk & top up ikut masuk antrean review sebagai pemasukan',
+                              ),
+                              value: notifStatus?.captureIncome ?? true,
+                              onChanged: (v) async {
+                                await ref
+                                    .read(notificationCaptureServiceProvider)
+                                    .setCaptureIncomeEnabled(v);
+                                ref.invalidate(
+                                  notificationCaptureStatusProvider,
+                                );
+                              },
+                            ),
+                          ],
                           if (notifStatus?.enabledInApp == true &&
                               !(notifStatus?.osPermissionGranted ?? false))
                             Padding(
@@ -1098,121 +1292,267 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                             )
                           else
                             for (final draft in drafts)
-                              Padding(
-                                padding: const EdgeInsets.only(bottom: 10),
-                                child: Card(
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(14),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 8,
-                                                    vertical: 3,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: cs.primaryContainer,
-                                                borderRadius:
-                                                    BorderRadius.circular(8),
-                                              ),
-                                              child: Text(
-                                                draft.bankName,
-                                                style: tt.labelSmall?.copyWith(
-                                                  color: cs.onPrimaryContainer,
-                                                  fontWeight: FontWeight.w700,
-                                                ),
-                                              ),
-                                            ),
-                                            const SizedBox(width: 8),
-                                            Expanded(
-                                              child: Text(
-                                                AppDateUtils.formatDayDate(
-                                                  DateTime.fromMillisecondsSinceEpoch(
-                                                    draft.occurredAt,
-                                                  ).toLocal(),
-                                                ),
-                                                style: tt.bodySmall?.copyWith(
-                                                  color: cs.onSurfaceVariant,
-                                                ),
-                                              ),
-                                            ),
-                                            AmountText(
-                                              amount: draft.amount,
-                                              type: 'expense',
-                                              style: tt.titleMedium?.copyWith(
-                                                fontWeight: FontWeight.w800,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                        const SizedBox(height: 8),
-                                        Text(
-                                          draft.merchantName,
-                                          style: tt.titleMedium,
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          draft.subject,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: tt.bodySmall?.copyWith(
-                                            color: cs.onSurfaceVariant,
-                                          ),
-                                        ),
-                                        const SizedBox(height: 12),
-                                        Wrap(
-                                          spacing: 8,
-                                          runSpacing: 6,
+                              Builder(
+                                builder: (ctx) {
+                                  final isIncome = draft.txType == 'income';
+                                  final mem = _findMemoryForDraft(
+                                    draft,
+                                    merchantMemories,
+                                  );
+                                  final typeCats = isIncome
+                                      ? incomeCats
+                                      : expenseCats;
+                                  String? hintLabel;
+                                  if (mem != null) {
+                                    final parts = <String>[];
+                                    if (mem.lastItemName != null &&
+                                        mem.lastItemName!.isNotEmpty) {
+                                      parts.add(mem.lastItemName!);
+                                    }
+                                    final cName = typeCats
+                                        .where(
+                                          (c) => c.id == mem.lastCategoryId,
+                                        )
+                                        .firstOrNull
+                                        ?.name;
+                                    if (cName != null) parts.add(cName);
+                                    final wName = wallets
+                                        .where(
+                                          (w) =>
+                                              w.wallet.id == mem.lastWalletId,
+                                        )
+                                        .firstOrNull
+                                        ?.wallet
+                                        .name;
+                                    final pName = allPockets
+                                        .where(
+                                          (p) =>
+                                              p.pocket.id == mem.lastPocketId,
+                                        )
+                                        .firstOrNull
+                                        ?.pocket
+                                        .name;
+                                    if (wName != null) {
+                                      parts.add(
+                                        pName != null
+                                            ? '$wName ($pName)'
+                                            : wName,
+                                      );
+                                    }
+                                    if (parts.isNotEmpty) {
+                                      hintLabel = parts.join(' • ');
+                                    }
+                                  }
+
+                                  return Padding(
+                                    padding: const EdgeInsets.only(bottom: 10),
+                                    child: Card(
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(14),
+                                        child: Column(
                                           crossAxisAlignment:
-                                              WrapCrossAlignment.center,
+                                              CrossAxisAlignment.start,
                                           children: [
-                                            TextButton(
-                                              onPressed: () => ref
-                                                  .read(qrisSyncServiceProvider)
-                                                  .dismissDraft(draft.id),
-                                              child: const Text('Abaikan'),
-                                            ),
-                                            OutlinedButton.icon(
-                                              onPressed: () =>
-                                                  _splitDraft(draft, wallets),
-                                              icon: const Icon(
-                                                Icons.call_split_rounded,
-                                                size: 16,
-                                              ),
-                                              label: const Text('Pecah Item'),
-                                            ),
-                                            OutlinedButton.icon(
-                                              onPressed: () => _splitBillDraft(
-                                                draft,
-                                                wallets,
-                                              ),
-                                              icon: const Icon(
-                                                Icons.groups_rounded,
-                                                size: 16,
-                                              ),
-                                              label: const Text('Split Bill'),
-                                            ),
-                                            FilledButton(
-                                              onPressed: () =>
-                                                  _confirmSingleDialog(
-                                                    draft,
-                                                    wallets,
-                                                    allPockets,
-                                                    expenseCats,
+                                            Row(
+                                              children: [
+                                                Container(
+                                                  padding:
+                                                      const EdgeInsets.symmetric(
+                                                        horizontal: 8,
+                                                        vertical: 3,
+                                                      ),
+                                                  decoration: BoxDecoration(
+                                                    color: isIncome
+                                                        ? cs.secondaryContainer
+                                                        : cs.primaryContainer,
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          8,
+                                                        ),
                                                   ),
-                                              child: const Text('Simpan'),
+                                                  child: Text(
+                                                    isIncome
+                                                        ? '${draft.bankName} • Masuk'
+                                                        : draft.bankName,
+                                                    style: tt.labelSmall?.copyWith(
+                                                      color: isIncome
+                                                          ? cs.onSecondaryContainer
+                                                          : cs.onPrimaryContainer,
+                                                      fontWeight:
+                                                          FontWeight.w700,
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Text(
+                                                    AppDateUtils.formatDayDate(
+                                                      DateTime.fromMillisecondsSinceEpoch(
+                                                        draft.occurredAt,
+                                                      ).toLocal(),
+                                                    ),
+                                                    style: tt.bodySmall
+                                                        ?.copyWith(
+                                                          color: cs
+                                                              .onSurfaceVariant,
+                                                        ),
+                                                  ),
+                                                ),
+                                                AmountText(
+                                                  amount: draft.amount,
+                                                  type: isIncome
+                                                      ? 'income'
+                                                      : 'expense',
+                                                  signed: isIncome,
+                                                  style: tt.titleMedium
+                                                      ?.copyWith(
+                                                        fontWeight:
+                                                            FontWeight.w800,
+                                                      ),
+                                                ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              draft.merchantName,
+                                              style: tt.titleMedium,
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              draft.subject,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: tt.bodySmall?.copyWith(
+                                                color: cs.onSurfaceVariant,
+                                              ),
+                                            ),
+                                            if (hintLabel != null) ...[
+                                              const SizedBox(height: 8),
+                                              Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 6,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: cs.primaryContainer
+                                                      .withValues(alpha: 0.35),
+                                                  borderRadius:
+                                                      BorderRadius.circular(10),
+                                                ),
+                                                child: Row(
+                                                  children: [
+                                                    Icon(
+                                                      Icons
+                                                          .auto_awesome_rounded,
+                                                      size: 14,
+                                                      color: cs.primary,
+                                                    ),
+                                                    const SizedBox(width: 6),
+                                                    Expanded(
+                                                      child: Text(
+                                                        'Tebakan otomatis: $hintLabel',
+                                                        maxLines: 1,
+                                                        overflow: TextOverflow
+                                                            .ellipsis,
+                                                        style: tt.labelSmall
+                                                            ?.copyWith(
+                                                              color: cs.primary,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                            ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                            const SizedBox(height: 12),
+                                            Wrap(
+                                              spacing: 8,
+                                              runSpacing: 6,
+                                              crossAxisAlignment:
+                                                  WrapCrossAlignment.center,
+                                              children: [
+                                                TextButton(
+                                                  onPressed: () => ref
+                                                      .read(
+                                                        qrisSyncServiceProvider,
+                                                      )
+                                                      .dismissDraft(draft.id),
+                                                  child: const Text('Abaikan'),
+                                                ),
+                                                if (!isIncome) ...[
+                                                  OutlinedButton.icon(
+                                                    onPressed: () =>
+                                                        _splitDraft(
+                                                          draft,
+                                                          wallets,
+                                                        ),
+                                                    icon: const Icon(
+                                                      Icons.call_split_rounded,
+                                                      size: 16,
+                                                    ),
+                                                    label: const Text(
+                                                      'Pecah Item',
+                                                    ),
+                                                  ),
+                                                  OutlinedButton.icon(
+                                                    onPressed: () =>
+                                                        _splitBillDraft(
+                                                          draft,
+                                                          wallets,
+                                                        ),
+                                                    icon: const Icon(
+                                                      Icons.groups_rounded,
+                                                      size: 16,
+                                                    ),
+                                                    label: const Text(
+                                                      'Split Bill',
+                                                    ),
+                                                  ),
+                                                ],
+                                                if (mem != null)
+                                                  FilledButton.tonalIcon(
+                                                    onPressed: () =>
+                                                        _quickConfirmWithMemory(
+                                                          draft,
+                                                          mem,
+                                                          wallets,
+                                                          allPockets,
+                                                        ),
+                                                    icon: const Icon(
+                                                      Icons.bolt_rounded,
+                                                      size: 16,
+                                                    ),
+                                                    label: const Text(
+                                                      'Simpan Cepat',
+                                                    ),
+                                                  ),
+                                                FilledButton(
+                                                  onPressed: () =>
+                                                      _confirmSingleDialog(
+                                                        draft,
+                                                        wallets,
+                                                        allPockets,
+                                                        typeCats,
+                                                        mem,
+                                                      ),
+                                                  child: Text(
+                                                    mem != null
+                                                        ? 'Edit'
+                                                        : 'Simpan',
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ],
                                         ),
-                                      ],
+                                      ),
                                     ),
-                                  ),
-                                ),
+                                  );
+                                },
                               ),
                         ],
                       );

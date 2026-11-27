@@ -9,6 +9,7 @@ import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
 import 'package:sakuin/core/widgets/empty_state.dart';
+import 'package:sakuin/features/wallet/pocket_group_detail_screen.dart';
 import 'package:sakuin/features/wallet/transfer_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_detail_screen.dart';
 import 'package:sakuin/features/wallet/wallet_form_sheet.dart';
@@ -227,40 +228,67 @@ class _WalletListScreenState extends ConsumerState<WalletListScreen> {
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Ketuk pos untuk lihat rincian per saku, target, & riwayat',
+                              style: tt.bodySmall?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
                             const SizedBox(height: 8),
                             Wrap(
                               spacing: 8,
                               runSpacing: 8,
                               children: [
                                 for (final g in groupedPockets)
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 10,
-                                      vertical: 7,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Color(g.color)
-                                          .withValues(alpha: 0.13),
+                                  Material(
+                                    color: Color(g.color)
+                                        .withValues(alpha: 0.13),
+                                    borderRadius: BorderRadius.circular(12),
+                                    child: InkWell(
                                       borderRadius: BorderRadius.circular(12),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          AppIcons.fromKey(g.icon),
-                                          size: 16,
-                                          color: Color(g.color),
+                                      onTap: () => Navigator.of(context).push(
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              PocketGroupDetailScreen(
+                                                normalizedKey: g.normalizedKey,
+                                                initialTitle: g.displayName,
+                                                initialIcon: g.icon,
+                                                initialColor: g.color,
+                                              ),
                                         ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          g.walletCount > 1
-                                              ? '${g.displayName} (${g.walletCount} saku): ${CurrencyFormatter.formatCompact(g.totalBalance)}'
-                                              : '${g.displayName}: ${CurrencyFormatter.formatCompact(g.totalBalance)}',
-                                          style: tt.labelMedium?.copyWith(
-                                            fontWeight: FontWeight.w700,
-                                          ),
+                                      ),
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 7,
                                         ),
-                                      ],
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              AppIcons.fromKey(g.icon),
+                                              size: 16,
+                                              color: Color(g.color),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              g.walletCount > 1
+                                                  ? '${g.displayName} (${g.walletCount} saku): ${CurrencyFormatter.formatCompact(g.totalBalance)}'
+                                                  : '${g.displayName}: ${CurrencyFormatter.formatCompact(g.totalBalance)}',
+                                              style: tt.labelMedium?.copyWith(
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 3),
+                                            Icon(
+                                              Icons.chevron_right_rounded,
+                                              size: 15,
+                                              color: cs.onSurfaceVariant,
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                     ),
                                   ),
                               ],

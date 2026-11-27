@@ -103,6 +103,12 @@ final quickItemsProvider = StreamProvider<List<ItemMemoryData>>((ref) {
   return ref.watch(appDatabaseProvider).watchQuickItems(limit: 12);
 });
 
+final merchantMemoryListProvider = StreamProvider<List<MerchantMemoryData>>((
+  ref,
+) {
+  return ref.watch(appDatabaseProvider).watchAllMerchantMemory();
+});
+
 class PaginatedTransactionsNotifier
     extends StateNotifier<PaginatedTransactionsState> {
   PaginatedTransactionsNotifier(this._db, this._filter)
@@ -206,6 +212,7 @@ class TransactionActions {
     int fee = 0,
     String note = '',
     String? itemName,
+    String? merchantName,
     required DateTime occurredAt,
     int? existingId,
   }) async {
@@ -220,6 +227,7 @@ class TransactionActions {
       fee: fee,
       note: note,
       itemName: itemName,
+      merchantName: merchantName,
       occurredAt: occurredAt,
       existingId: existingId,
     );
@@ -342,6 +350,7 @@ class TransactionActions {
       categoryId: item.lastCategoryId,
       pocketId: item.lastPocketId,
       itemName: item.displayName,
+      merchantName: item.lastMerchantName,
       note: item.lastNote,
       occurredAt: DateTime.now(),
     );
@@ -360,8 +369,10 @@ class TransactionActions {
       displayName: label,
       type: tx.type,
       amount: tx.amount,
+      merchantName: tx.merchantName,
       categoryId: tx.categoryId,
       walletId: tx.walletId,
+      pocketId: tx.pocketId,
       note: tx.note,
       isPinned: true,
     );

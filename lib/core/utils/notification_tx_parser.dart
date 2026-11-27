@@ -9,6 +9,7 @@ class ParsedNotificationTx {
     required this.occurredAt,
     required this.title,
     required this.snippet,
+    this.txType = 'expense',
   });
 
   final String uid;
@@ -18,6 +19,7 @@ class ParsedNotificationTx {
   final DateTime occurredAt;
   final String title;
   final String snippet;
+  final String txType; // 'expense' | 'income'
 }
 
 /// Parser 100% lokal untuk notifikasi push transaksi dari aplikasi bank & e-wallet Indonesia.
@@ -54,7 +56,7 @@ class NotificationTxParser {
     'id.krom.bank': 'Krom',
   };
 
-  static const List<String> _rejectPhrases = [
+  static const List<String> _hardRejectPhrases = [
     'kode otp',
     'otp ',
     'kode verifikasi',
@@ -63,21 +65,28 @@ class NotificationTxParser {
     'failed',
     'dibatalkan',
     'ditolak',
-    'dana masuk',
-    'uang masuk',
-    'saldo masuk',
-    'kamu menerima',
-    'anda menerima',
-    'terima dana',
-    'top up berhasil',
-    'isi saldo berhasil',
-    'cashback masuk',
     'diskon hingga',
     'cashback hingga',
     'promo spesial',
     'voucher menunggu',
     'klaim sekarang',
     'kirim uang ke teman yuk',
+  ];
+
+  static const List<String> _incomeSignals = [
+    'dana masuk',
+    'uang masuk',
+    'saldo masuk',
+    'transfer masuk',
+    'kamu menerima',
+    'anda menerima',
+    'terima dana',
+    'terima transfer',
+    'top up berhasil',
+    'isi saldo berhasil',
+    'cashback masuk',
+    'kredit sebesar',
+    'credited',
   ];
 
   static const List<String> _expenseSignals = [
@@ -102,34 +111,44 @@ class NotificationTxParser {
     return _packageToBank[packageName] ?? 'Notifikasi Bank';
   }
 
-  /// Parse notifikasi bank/e-wallet menjadi transaksi pengeluaran untuk antrean Review.
-  /// Mengembalikan `null` jika notifikasi adalah promo, OTP, gagal, atau dana masuk.
+  /// Parse notifikasi bank/e-wallet menjadi transaksi pengeluaran (atau pemasukan jika
+  /// [captureIncome] aktif) untuk antrean Review.
+  /// Mengembalikan `null` jika notifikasi adalah promo, OTP, atau transaksi gagal.
   static ParsedNotificationTx? parse({
     required String packageName,
     required String title,
     required String text,
     required DateTime timestamp,
+    bool captureIncome = false,
   }) {
     final combined = '${title.trim()}\n${text.trim()}'.trim();
     if (combined.isEmpty) return null;
 
     final lower = combined.toLowerCase();
-    for (final reject in _rejectPhrases) {
+    for (final reject in _hardRejectPhrases) {
       if (lower.contains(reject)) return null;
     }
 
-    final hasSignal = _expenseSignals.any(lower.contains);
-    if (!hasSignal) return null;
+    final isIncome = _incomeSignals.any(lower.contains);
+    if (isIncome && !captureIncome) return null;
+
+    final txType = isIncome ? 'income' : 'expense';
+    if (!isIncome) {
+      final hasSignal = _expenseSignals.any(lower.contains);
+      if (!hasSignal) return null;
+    }
 
     final amount = QrisEmailParser.extractAmount(combined);
     if (amount == null || amount < 100) return null;
 
     final bankName = bankNameForPackage(packageName);
-    final merchant = _extractMerchant(combined, title, bankName);
-    // Buat UID unik berbasis paket + menit + nominal + merchant agar tidak dobel
+    final merchant = isIncome
+        ? _extractSenderForIncome(combined, bankName)
+        : _extractMerchant(combined, title, bankName);
+    // Buat UID unik berbasis paket + menit + tipe + nominal + merchant agar tidak dobel
     final minuteBucket = timestamp.millisecondsSinceEpoch ~/ 60000;
     final uid =
-        'notif:$packageName:$minuteBucket:$amount:${merchant.toLowerCase().hashCode}';
+        'notif:$packageName:$txType:$minuteBucket:$amount:${merchant.toLowerCase().hashCode}';
 
     final snippet = combined.length > 180
         ? '${combined.substring(0, 180)}...'
@@ -143,7 +162,24 @@ class NotificationTxParser {
       occurredAt: timestamp,
       title: title.isNotEmpty ? title : 'Notifikasi $bankName',
       snippet: snippet,
+      txType: txType,
     );
+  }
+
+  static String _extractSenderForIncome(String combined, String bankName) {
+    final m = RegExp(
+      r'\b(?:dari|from)\s+([A-Za-z0-9][A-Za-z0-9\s&._\-/]{1,42}?)(?:\s+(?:berhasil|sukses|sebesar|senilai|ke|pada|rp\.?|idr)\b|[.,\r\n]|$)',
+      caseSensitive: false,
+    ).firstMatch(combined);
+    if (m != null) {
+      final name = (m.group(1) ?? '').trim().replaceAll(RegExp(r'\s+'), ' ');
+      if (name.length >= 2 &&
+          !name.toLowerCase().startsWith('rp') &&
+          !RegExp(r'^[0-9.,\s]+$').hasMatch(name)) {
+        return name;
+      }
+    }
+    return 'Dana Masuk $bankName';
   }
 
   static String _extractMerchant(

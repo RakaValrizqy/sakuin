@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sakuin/core/services/auto_backup_service.dart';
 import 'package:sakuin/core/services/backup_service.dart';
 import 'package:sakuin/core/services/notification_service.dart';
 import 'package:sakuin/core/services/settings_service.dart';
@@ -150,9 +151,91 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
     }
   }
 
+  Future<void> _restoreFromSnapshot(LocalBackupSnapshot snap) async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    BackupPreview? preview;
+    try {
+      final content = await snap.file.readAsString();
+      preview = ref.read(backupServiceProvider).parseBackupJson(content);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Snapshot rusak: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+    if (preview == null || !mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Pulihkan Snapshot Lokal?'),
+        content: Text(
+          'Memulihkan ${snap.fileName} (${preview!.transactionCount} transaksi, ${preview.walletCount} dompet). Seluruh data saat ini akan diganti dengan snapshot ini.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Batal'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Pulihkan'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _busy = true);
+    try {
+      await ref
+          .read(backupServiceProvider)
+          .restoreBackup(preview, replaceExisting: true);
+      ref.read(transactionRevisionProvider.notifier).state++;
+      ref.read(budgetsRevisionProvider.notifier).state++;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Snapshot lokal berhasil dipulihkan')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _runAutoBackupNow() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(autoBackupServiceProvider).runAutoBackupNow();
+      ref.invalidate(autoBackupConfigProvider);
+      ref.invalidate(localBackupSnapshotsProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Snapshot backup lokal tersimpan')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Gagal backup lokal: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
+    final autoCfg =
+        ref.watch(autoBackupConfigProvider).valueOrNull ??
+        const AutoBackupConfig();
+    final snapshots =
+        ref.watch(localBackupSnapshotsProvider).valueOrNull ?? const [];
     final tt = Theme.of(context).textTheme;
     final cs = Theme.of(context).colorScheme;
 
@@ -241,6 +324,112 @@ class _BackupScreenState extends ConsumerState<BackupScreen> {
               ),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: _pickAndRestore,
+            ),
+          ),
+          const SizedBox(height: 14),
+          Card(
+            child: Column(
+              children: [
+                SwitchListTile(
+                  secondary: const Icon(Icons.autorenew_rounded),
+                  title: const Text('Backup otomatis lokal berkala'),
+                  subtitle: const Text(
+                    'Simpan hingga 5 snapshot JSON terbaru di HP secara otomatis saat aplikasi dibuka',
+                  ),
+                  value: autoCfg.enabled,
+                  onChanged: (v) async {
+                    await ref.read(autoBackupServiceProvider).setEnabled(v);
+                    if (v) {
+                      await _runAutoBackupNow();
+                    } else {
+                      ref.invalidate(autoBackupConfigProvider);
+                    }
+                  },
+                ),
+                if (autoCfg.enabled) ...[
+                  const Divider(height: 1),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Frekuensi', style: tt.labelMedium),
+                        const SizedBox(height: 8),
+                        SegmentedButton<int>(
+                          segments: const [
+                            ButtonSegment(value: 1, label: Text('Harian')),
+                            ButtonSegment(value: 3, label: Text('3 Hari')),
+                            ButtonSegment(value: 7, label: Text('Mingguan')),
+                          ],
+                          selected: {autoCfg.intervalDays},
+                          onSelectionChanged: (sel) async {
+                            await ref
+                                .read(autoBackupServiceProvider)
+                                .setIntervalDays(sel.first);
+                            ref.invalidate(autoBackupConfigProvider);
+                          },
+                        ),
+                        const SizedBox(height: 10),
+                        SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed: _busy ? null : _runAutoBackupNow,
+                            icon: const Icon(Icons.backup_outlined, size: 18),
+                            label: const Text('Buat Snapshot Lokal Sekarang'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+                if (snapshots.isNotEmpty) ...[
+                  const Divider(height: 1),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Snapshot Lokal Tersimpan (${snapshots.length}/${AutoBackupService.maxRetainedSnapshots})',
+                        style: tt.labelMedium?.copyWith(
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
+                  ),
+                  for (final snap in snapshots)
+                    ListTile(
+                      dense: true,
+                      leading: const Icon(Icons.description_outlined, size: 20),
+                      title: Text(
+                        '${AppDateUtils.formatDayDate(snap.modifiedAt)} • ${AppDateUtils.formatTime(snap.modifiedAt)}',
+                        style: tt.bodyMedium,
+                      ),
+                      subtitle: Text(
+                        '${(snap.sizeBytes / 1024).toStringAsFixed(1)} KB • ${snap.fileName}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: tt.labelSmall,
+                      ),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: 'Bagikan ke Drive / WhatsApp',
+                            icon: const Icon(Icons.share_outlined, size: 18),
+                            onPressed: () => ref
+                                .read(autoBackupServiceProvider)
+                                .shareSnapshot(snap),
+                          ),
+                          IconButton(
+                            tooltip: 'Pulihkan snapshot ini',
+                            icon: const Icon(Icons.restore_rounded, size: 18),
+                            onPressed: () => _restoreFromSnapshot(snap),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ],
             ),
           ),
           const SizedBox(height: 14),

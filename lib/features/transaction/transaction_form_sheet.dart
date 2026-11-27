@@ -9,6 +9,7 @@ import 'package:sakuin/core/utils/amount_parser.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/utils/haptics.dart';
+import 'package:sakuin/core/utils/quick_input_parser.dart';
 import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
 import 'package:sakuin/core/widgets/nominal_shortcut_bar.dart';
@@ -23,6 +24,7 @@ Future<bool?> showTransactionFormSheet(
   TransactionDetail? existing,
   TransactionDetail? duplicateFrom,
   ItemMemoryData? prefillItem,
+  QuickParsedTransaction? prefillParsed,
   String initialType = 'expense',
 }) {
   return showModalBottomSheet<bool>(
@@ -36,6 +38,7 @@ Future<bool?> showTransactionFormSheet(
         existing: existing,
         duplicateFrom: duplicateFrom,
         prefillItem: prefillItem,
+        prefillParsed: prefillParsed,
         initialType: initialType,
       ),
     ),
@@ -48,12 +51,14 @@ class TransactionFormSheet extends ConsumerStatefulWidget {
     this.existing,
     this.duplicateFrom,
     this.prefillItem,
+    this.prefillParsed,
     this.initialType = 'expense',
   });
 
   final TransactionDetail? existing;
   final TransactionDetail? duplicateFrom;
   final ItemMemoryData? prefillItem;
+  final QuickParsedTransaction? prefillParsed;
   final String initialType;
 
   @override
@@ -65,10 +70,12 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
   late String _type; // 'expense' | 'income' | 'transfer'
   final _amountCtrl = TextEditingController();
   final _itemCtrl = TextEditingController();
+  final _merchantCtrl = TextEditingController();
   final _noteCtrl = TextEditingController();
   final _feeCtrl = TextEditingController();
   final _amountFocus = FocusNode();
   final _itemFocus = FocusNode();
+  final _merchantFocus = FocusNode();
 
   int? _categoryId;
   int? _walletId;
@@ -85,6 +92,7 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
 
   List<Category> _orderedCategories = [];
   List<ItemMemoryData> _suggestions = [];
+  List<MerchantMemoryData> _merchantSuggestions = [];
 
   void _setAmountValue(int amount) {
     final text = amount > 0
@@ -106,6 +114,7 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _type = tx.type;
       _setAmountValue(tx.amount);
       _itemCtrl.text = tx.itemName ?? '';
+      _merchantCtrl.text = tx.merchantName ?? '';
       _noteCtrl.text = tx.note;
       _feeCtrl.text = tx.fee > 0
           ? CurrencyFormatter.format(tx.fee, withSymbol: false)
@@ -123,6 +132,7 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _type = tx.type;
       _setAmountValue(tx.amount);
       _itemCtrl.text = tx.itemName ?? '';
+      _merchantCtrl.text = tx.merchantName ?? '';
       _noteCtrl.text = tx.note;
       _feeCtrl.text = tx.fee > 0
           ? CurrencyFormatter.format(tx.fee, withSymbol: false)
@@ -139,12 +149,25 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _type = item.type;
       _setAmountValue(item.lastAmount);
       _itemCtrl.text = item.displayName;
+      _merchantCtrl.text = item.lastMerchantName ?? '';
       _noteCtrl.text = item.lastNote;
       _categoryId = item.lastCategoryId;
       _walletId = item.lastWalletId;
       _pocketId = item.lastPocketId;
       _occurredAt = DateTime.now();
       _showNoteField = item.lastNote.isNotEmpty;
+    } else if (widget.prefillParsed != null) {
+      final p = widget.prefillParsed!;
+      _type = p.type;
+      _setAmountValue(p.amount);
+      _itemCtrl.text = p.itemName ?? '';
+      _merchantCtrl.text = p.merchantName ?? '';
+      _noteCtrl.text = p.note;
+      _categoryId = p.categoryId;
+      _walletId = p.walletId ?? ref.read(settingsProvider).lastWalletId;
+      _pocketId = p.pocketId;
+      _occurredAt = DateTime.now();
+      _showNoteField = p.note.isNotEmpty;
     } else {
       _type = widget.initialType;
       _walletId = ref.read(settingsProvider).lastWalletId;
@@ -152,16 +175,19 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
 
     _loadCategories();
     _loadSuggestions('');
+    _loadMerchantSuggestions('');
   }
 
   @override
   void dispose() {
     _amountCtrl.dispose();
     _itemCtrl.dispose();
+    _merchantCtrl.dispose();
     _noteCtrl.dispose();
     _feeCtrl.dispose();
     _amountFocus.dispose();
     _itemFocus.dispose();
+    _merchantFocus.dispose();
     super.dispose();
   }
 
@@ -192,6 +218,17 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
     setState(() => _suggestions = results);
   }
 
+  Future<void> _loadMerchantSuggestions(String query) async {
+    if (_type == 'transfer') {
+      if (mounted) setState(() => _merchantSuggestions = []);
+      return;
+    }
+    final db = ref.read(appDatabaseProvider);
+    final results = await db.searchMerchantMemory(query, type: _type, limit: 6);
+    if (!mounted) return;
+    setState(() => _merchantSuggestions = results);
+  }
+
   void _applyItemSuggestion(ItemMemoryData item) {
     final haptics = ref.read(settingsProvider).hapticsEnabled;
     AppHaptics.selection(haptics);
@@ -199,6 +236,10 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
     setState(() {
       _type = item.type;
       _itemCtrl.text = item.displayName;
+      if (item.lastMerchantName != null &&
+          item.lastMerchantName!.trim().isNotEmpty) {
+        _merchantCtrl.text = item.lastMerchantName!.trim();
+      }
       _setAmountValue(item.lastAmount);
       if (item.lastCategoryId != null) _categoryId = item.lastCategoryId;
       if (item.lastWalletId != null) _walletId = item.lastWalletId;
@@ -206,6 +247,33 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _noteCtrl.text = item.lastNote;
       if (item.lastNote.isNotEmpty) _showNoteField = true;
       _suggestions = [];
+    });
+  }
+
+  void _applyMerchantSuggestion(MerchantMemoryData merchant) {
+    final haptics = ref.read(settingsProvider).hapticsEnabled;
+    AppHaptics.selection(haptics);
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _type = merchant.type;
+      _merchantCtrl.text = merchant.displayMerchant;
+      if (merchant.lastItemName != null &&
+          merchant.lastItemName!.trim().isNotEmpty) {
+        _itemCtrl.text = merchant.lastItemName!.trim();
+      }
+      if (merchant.lastAmount > 0) {
+        _setAmountValue(merchant.lastAmount);
+      }
+      if (merchant.lastCategoryId != null) {
+        _categoryId = merchant.lastCategoryId;
+      }
+      if (merchant.lastWalletId != null) {
+        _walletId = merchant.lastWalletId;
+      }
+      _pocketId = merchant.lastPocketId;
+      _noteCtrl.text = merchant.lastNote;
+      if (merchant.lastNote.isNotEmpty) _showNoteField = true;
+      _merchantSuggestions = [];
     });
   }
 
@@ -224,6 +292,7 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _type = tx.type;
       _setAmountValue(tx.amount);
       _itemCtrl.text = tx.itemName ?? '';
+      _merchantCtrl.text = tx.merchantName ?? '';
       _noteCtrl.text = tx.note;
       _feeCtrl.text = tx.fee > 0
           ? CurrencyFormatter.format(tx.fee, withSymbol: false)
@@ -377,6 +446,7 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
           fee: fee,
           note: _noteCtrl.text.trim(),
           itemName: _type == 'transfer' ? null : _itemCtrl.text.trim(),
+          merchantName: _type == 'transfer' ? null : _merchantCtrl.text.trim(),
           occurredAt: _occurredAt,
         );
 
@@ -568,6 +638,7 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                     setState(() => _type = set.first);
                     _loadCategories();
                     _loadSuggestions(_itemCtrl.text);
+                    _loadMerchantSuggestions(_merchantCtrl.text);
                   },
                 ),
                 const SizedBox(height: 12),
@@ -596,7 +667,8 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                         autofocus:
                             !isEdit &&
                             widget.duplicateFrom == null &&
-                            widget.prefillItem == null,
+                            widget.prefillItem == null &&
+                            widget.prefillParsed == null,
                         keyboardType: TextInputType.number,
                         inputFormatters: [ThousandsSeparatorInputFormatter()],
                         textAlign: TextAlign.right,
@@ -680,9 +752,73 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                               color: cs.primary,
                             ),
                             label: Text(
-                              '${item.displayName} • ${CurrencyFormatter.formatCompact(item.lastAmount)}',
+                              item.lastMerchantName != null &&
+                                      item.lastMerchantName!.trim().isNotEmpty
+                                  ? '${item.displayName} • ${item.lastMerchantName} • ${CurrencyFormatter.formatCompact(item.lastAmount)}'
+                                  : '${item.displayName} • ${CurrencyFormatter.formatCompact(item.lastAmount)}',
                             ),
                             onPressed: () => _applyItemSuggestion(item),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+
+                  // 3b. Nama Merchant / Toko + Autocomplete Pasangan Otomatis
+                  TextField(
+                    controller: _merchantCtrl,
+                    focusNode: _merchantFocus,
+                    textCapitalization: TextCapitalization.words,
+                    onChanged: _loadMerchantSuggestions,
+                    decoration: InputDecoration(
+                      labelText: _type == 'expense'
+                          ? 'Nama merchant / toko (opsional)'
+                          : 'Sumber / pengirim (opsional)',
+                      hintText: _type == 'expense'
+                          ? 'Contoh: Indomaret, Kopi Kenangan, Gojek'
+                          : 'Contoh: Kantor, Orang tua, Klien',
+                      prefixIcon: const Icon(Icons.storefront_rounded),
+                      suffixIcon: _merchantCtrl.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear_rounded),
+                              onPressed: () {
+                                _merchantCtrl.clear();
+                                _loadMerchantSuggestions('');
+                                setState(() {});
+                              },
+                            )
+                          : null,
+                    ),
+                  ),
+                  if (_merchantSuggestions.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 44,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: _merchantSuggestions.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 8),
+                        itemBuilder: (_, idx) {
+                          final m = _merchantSuggestions[idx];
+                          final parts = <String>[m.displayMerchant];
+                          if (m.lastItemName != null &&
+                              m.lastItemName!.trim().isNotEmpty) {
+                            parts.add(m.lastItemName!.trim());
+                          }
+                          if (m.lastAmount > 0) {
+                            parts.add(
+                              CurrencyFormatter.formatCompact(m.lastAmount),
+                            );
+                          }
+                          return ActionChip(
+                            avatar: Icon(
+                              Icons.storefront_rounded,
+                              size: 16,
+                              color: cs.primary,
+                            ),
+                            label: Text(parts.join(' • ')),
+                            onPressed: () => _applyMerchantSuggestion(m),
                           );
                         },
                       ),

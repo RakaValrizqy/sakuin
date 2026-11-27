@@ -51,6 +51,12 @@ class TransactionTile extends StatelessWidget {
               : (detail.category?.name ?? 'Transaksi'));
 
     final subtitleParts = <String>[];
+    if (!isTransfer &&
+        tx.merchantName != null &&
+        tx.merchantName!.trim().isNotEmpty &&
+        tx.merchantName!.trim().toLowerCase() != title.toLowerCase()) {
+      subtitleParts.add(tx.merchantName!.trim());
+    }
     if (!isTransfer && detail.category != null && tx.itemName != null) {
       subtitleParts.add(detail.category!.name);
     }

@@ -16,6 +16,8 @@ import 'package:sakuin/features/report/widgets/donut_chart.dart';
 import 'package:sakuin/features/report/widgets/spending_heatmap_card.dart';
 import 'package:sakuin/features/report/widgets/trend_chart.dart';
 import 'package:sakuin/features/transaction/widgets/transaction_tile.dart';
+import 'package:sakuin/features/wallet/pocket_group_detail_screen.dart';
+import 'package:sakuin/features/wallet/wallet_providers.dart';
 
 class ReportScreen extends ConsumerStatefulWidget {
   const ReportScreen({super.key});
@@ -153,6 +155,10 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
     final reportType = ref.watch(reportTypeProvider);
     final reportAsync = ref.watch(reportDataProvider);
     final insightsAsync = ref.watch(periodInsightsProvider);
+    final pocketReportAsync = ref.watch(pocketReportProvider);
+    final growthAsync = ref.watch(savingsGrowthProvider);
+    final allPockets =
+        ref.watch(allActivePocketsProvider).valueOrNull ?? const [];
     final budgetsAsync = ref.watch(budgetProgressListProvider);
 
     final tt = Theme.of(context).textTheme;
@@ -493,6 +499,24 @@ class _ReportScreenState extends ConsumerState<ReportScreen> {
                   // Insight & Perbandingan Periode Otomatis
                   if (insightsAsync.valueOrNull != null) ...[
                     _PeriodInsightsCard(insights: insightsAsync.valueOrNull!),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Laporan Khusus Pos Budget (Pemakaian & Sisa per Pos Gabungan)
+                  if ((pocketReportAsync.valueOrNull ?? const [])
+                      .isNotEmpty) ...[
+                    _PocketBudgetReportCard(
+                      items: pocketReportAsync.valueOrNull!,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+
+                  // Grafik Pertumbuhan Saldo & Tabungan (6 Periode Terakhir)
+                  if ((growthAsync.valueOrNull ?? const []).isNotEmpty) ...[
+                    _SavingsGrowthCard(
+                      points: growthAsync.valueOrNull!,
+                      allPockets: allPockets,
+                    ),
                     const SizedBox(height: 16),
                   ],
 
@@ -868,6 +892,288 @@ class _CategoryBarRow extends StatelessWidget {
                       backgroundColor: cs.surfaceContainerHighest,
                     ),
                   ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PocketBudgetReportCard extends StatelessWidget {
+  const _PocketBudgetReportCard({required this.items});
+
+  final List<PocketReportSummary> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.savings_outlined, size: 20, color: cs.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('Laporan per Pos Budget', style: tt.titleMedium),
+                ),
+                Text(
+                  'Ketuk detail',
+                  style: tt.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            for (final item in items)
+              InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => PocketGroupDetailScreen(
+                      normalizedKey: item.group.normalizedKey,
+                      initialTitle: item.group.displayName,
+                      initialIcon: item.group.icon,
+                      initialColor: item.group.color,
+                    ),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 8,
+                    horizontal: 4,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          CategoryIconBadge(
+                            iconKey: item.group.icon,
+                            colorValue: item.group.color,
+                            size: 32,
+                            iconSize: 16,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  item.group.walletCount > 1
+                                      ? '${item.group.displayName} (${item.group.walletCount} saku)'
+                                      : item.group.displayName,
+                                  style: tt.titleSmall,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                Text(
+                                  'Sisa ${CurrencyFormatter.formatCompact(item.group.totalBalance)} • ${item.txCount} tx',
+                                  style: tt.bodySmall?.copyWith(
+                                    color: cs.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: [
+                              Text(
+                                'Terpakai ${CurrencyFormatter.formatCompact(item.spentInPeriod)}',
+                                style: tt.labelMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                  color: item.spentInPeriod > 0
+                                      ? AppColors.expense(context)
+                                      : cs.onSurfaceVariant,
+                                ),
+                              ),
+                              Text(
+                                '${(item.usedRatio * 100).round()}% terpakai',
+                                style: tt.labelSmall?.copyWith(
+                                  color: cs.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: item.usedRatio,
+                          minHeight: 6,
+                          color: Color(item.group.color),
+                          backgroundColor: cs.surfaceContainerHighest,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SavingsGrowthCard extends StatelessWidget {
+  const _SavingsGrowthCard({required this.points, required this.allPockets});
+
+  final List<MonthlyGrowthPoint> points;
+  final List<PocketWithBalance> allPockets;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final tt = Theme.of(context).textTheme;
+
+    final maxBal = points.fold<int>(
+      1,
+      (m, p) => p.estimatedEndingBalance.abs() > m
+          ? p.estimatedEndingBalance.abs()
+          : m,
+    );
+    final firstBal = points.first.estimatedEndingBalance;
+    final lastBal = points.last.estimatedEndingBalance;
+    final totalDelta = lastBal - firstBal;
+
+    final savingsPocketsTotal = allPockets
+        .where((p) {
+          final n = p.pocket.name.toLowerCase();
+          return n.contains('tabung') ||
+              n.contains('darurat') ||
+              n.contains('saving') ||
+              n.contains('invest');
+        })
+        .fold<int>(0, (s, p) => s + p.balance);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.trending_up_rounded,
+                  size: 20,
+                  color: AppColors.income(context),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Pertumbuhan Saldo (6 Periode)',
+                    style: tt.titleMedium,
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color:
+                        (totalDelta >= 0
+                                ? AppColors.income(context)
+                                : AppColors.expense(context))
+                            .withValues(alpha: 0.14),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    '${totalDelta >= 0 ? '+' : '-'}${CurrencyFormatter.formatCompact(totalDelta.abs())}',
+                    style: tt.labelSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: totalDelta >= 0
+                          ? AppColors.income(context)
+                          : AppColors.expense(context),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (savingsPocketsTotal > 0) ...[
+              const SizedBox(height: 6),
+              Text(
+                'Total pos Tabungan & Dana Darurat saat ini: ${CurrencyFormatter.format(savingsPocketsTotal)}',
+                style: tt.bodySmall?.copyWith(color: cs.onSurfaceVariant),
+              ),
+            ],
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 145,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  for (final pt in points)
+                    Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            Text(
+                              CurrencyFormatter.formatCompact(
+                                pt.estimatedEndingBalance,
+                              ).replaceFirst('Rp ', ''),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: tt.labelSmall?.copyWith(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Container(
+                              height:
+                                  (pt.estimatedEndingBalance <= 0
+                                          ? 6.0
+                                          : (pt.estimatedEndingBalance /
+                                                    maxBal) *
+                                                82.0)
+                                      .clamp(6.0, 82.0),
+                              decoration: BoxDecoration(
+                                color: pt.net >= 0
+                                    ? AppColors.income(context)
+                                          .withValues(alpha: 0.78)
+                                    : AppColors.expense(context)
+                                          .withValues(alpha: 0.7),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              pt.label,
+                              style: tt.labelSmall?.copyWith(
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                            Text(
+                              pt.net == 0
+                                  ? '0'
+                                  : '${pt.net > 0 ? '+' : '-'}${CurrencyFormatter.formatCompact(pt.net.abs()).replaceFirst('Rp ', '')}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: tt.labelSmall?.copyWith(
+                                fontSize: 9.5,
+                                color: pt.net >= 0
+                                    ? AppColors.income(context)
+                                    : AppColors.expense(context),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),

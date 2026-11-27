@@ -1,5 +1,14 @@
 # Catatan Rilis Sakuin
 
+## v1.8.0
+### Apa yang Baru
+- **Input Nama Merchant + Auto-Fill Pasangan Penuh (Merchant ↔ Item ↔ Nominal ↔ Kategori ↔ Dompet ↔ Pos):** Setiap catatan transaksi kini punya kolom **Nama Merchant / Toko** (opsional) dengan saran otomatis dua arah — ketuk saran item maupun merchant untuk langsung mengisi seluruh data transaksi tanpa input ulang.
+- **Detail & Riwayat Pos Budget Gabungan:** Setiap chip di kartu **Ringkasan Pos Budget (Gabungan Semua Saku)** pada tab **Dompet** kini bisa diketuk untuk melihat rincian saldo per saku, **Target Saldo + Progress Bar**, total masuk/keluar periode ini, dan seluruh riwayat transaksi pos tersebut.
+- **Review Antrean QRIS & Notifikasi Lebih Cerdas (1-Tap *Simpan Cepat* + Tangkap Dana Masuk):** Antrean otomatis mengenali merchant dari riwayat dan menampilkan tombol **Simpan Cepat** (1 ketuk) beserta pratinjau tebakan otomatis (*item, kategori, dompet, pos budget*). Ditambah opsi menangkap **notifikasi dana masuk / transfer masuk** ke antrean review (bisa langsung dibagi % ke pos budget!).
+- **Laporan Khusus Pos Budget & Grafik Pertumbuhan Saldo (6 Periode):** Tab **Laporan** kini menampilkan kartu **Laporan per Pos Budget** (terpakai vs sisa saldo, bisa diketuk ke detail) serta grafik **Pertumbuhan Saldo (6 Periode Terakhir)** lengkap dengan ringkasan total pos Tabungan & Dana Darurat.
+- **Backup Otomatis Lokal Berkala (Anti-Lupa):** Aktifkan di **Backup & Restore** untuk menyimpan otomatis hingga 5 snapshot JSON terbaru di HP (Harian / 3 Hari / Mingguan) yang siap dibagikan atau dipulihkan 1 ketuk, plus pengingat halus di Beranda jika belum backup lebih dari 14 hari.
+- **Catat Cepat 1 Baris (*Quick Natural Input* — 100% Offline):** Kartu input cepat di Beranda untuk mengetik atau dikte suara 1 baris seperti `"kopi susu 18rb gopay harian"` atau `"makan 25k @warteg mandiri"` → otomatis terurai lengkap lalu 1 ketuk **Simpan** atau **Edit Form**.
+
 ## v1.7.3
 ### Peningkatan & Perbaikan
 - **Opsi Tambah Kategori Langsung Saat Catat Transaksi & Simpan QRIS:** Menambahkan tombol **`+ Tambah Kategori`** langsung pada pilihan kategori di layar **Catat Transaksi** (dan di dalam modal *Lainnya...*) serta tombol **`+`** di sebelah pilihan kategori pada dialog **Simpan Pengeluaran QRIS** — kategori baru langsung tersimpan dan otomatis terpilih tanpa harus keluar dari form.

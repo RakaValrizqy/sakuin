@@ -36,7 +36,7 @@ class BackupPreview {
 class BackupService {
   BackupService(this._db);
 
-  static const int currentBackupVersion = 3;
+  static const int currentBackupVersion = 4;
   final AppDatabase _db;
 
   Future<String> buildJsonBackup() async {
@@ -46,6 +46,7 @@ class BackupService {
     final categories = await _db.select(_db.categories).get();
     final transactions = await _db.select(_db.transactions).get();
     final itemMemory = await _db.select(_db.itemMemory).get();
+    final merchantMemory = await _db.select(_db.merchantMemory).get();
     final recurringRules = await _db.select(_db.recurringRules).get();
     final people = await _db.select(_db.people).get();
     final debts = await _db.select(_db.debts).get();
@@ -64,6 +65,7 @@ class BackupService {
         'categories': categories.map((e) => e.toJson()).toList(),
         'transactions': transactions.map((e) => e.toJson()).toList(),
         'item_memory': itemMemory.map((e) => e.toJson()).toList(),
+        'merchant_memory': merchantMemory.map((e) => e.toJson()).toList(),
         'recurring_rules': recurringRules.map((e) => e.toJson()).toList(),
         'people': people.map((e) => e.toJson()).toList(),
         'debts': debts.map((e) => e.toJson()).toList(),
@@ -189,6 +191,7 @@ class BackupService {
     final categoryRows = tableRows('categories');
     final txRows = tableRows('transactions');
     final memoryRows = tableRows('item_memory');
+    final merchantMemoryRows = tableRows('merchant_memory');
     final recurringRows = tableRows('recurring_rules');
     final peopleRows = tableRows('people');
     final debtRows = tableRows('debts');
@@ -202,6 +205,7 @@ class BackupService {
         await _db.delete(_db.people).go();
         await _db.delete(_db.budgets).go();
         await _db.delete(_db.recurringRules).go();
+        await _db.delete(_db.merchantMemory).go();
         await _db.delete(_db.itemMemory).go();
         await _db.delete(_db.transactions).go();
         await _db.delete(_db.pocketAllocations).go();
@@ -244,6 +248,12 @@ class BackupService {
           await _db
               .into(_db.itemMemory)
               .insert(m, mode: InsertMode.insertOrReplace);
+        }
+        for (final row in merchantMemoryRows) {
+          final mm = MerchantMemoryData.fromJson(row);
+          await _db
+              .into(_db.merchantMemory)
+              .insert(mm, mode: InsertMode.insertOrReplace);
         }
         for (final row in recurringRows) {
           final r = RecurringRule.fromJson(row);
@@ -416,6 +426,7 @@ class BackupService {
                   fee: Value(t.fee),
                   note: Value(t.note),
                   itemName: Value(t.itemName),
+                  merchantName: Value(t.merchantName),
                   splitGroupId: Value(t.splitGroupId),
                   externalRef: Value(t.externalRef),
                   occurredAt: t.occurredAt,
@@ -432,6 +443,7 @@ class BackupService {
             displayName: m.displayName,
             type: m.type,
             amount: m.lastAmount,
+            merchantName: m.lastMerchantName,
             categoryId: m.lastCategoryId == null
                 ? null
                 : categoryIdMap[m.lastCategoryId],
@@ -443,6 +455,26 @@ class BackupService {
                 : pocketIdMap[m.lastPocketId],
             note: m.lastNote,
             isPinned: m.isPinned,
+          );
+        }
+
+        for (final row in merchantMemoryRows) {
+          final mm = MerchantMemoryData.fromJson(row);
+          await _db.upsertMerchantMemory(
+            displayMerchant: mm.displayMerchant,
+            type: mm.type,
+            itemName: mm.lastItemName,
+            amount: mm.lastAmount,
+            categoryId: mm.lastCategoryId == null
+                ? null
+                : categoryIdMap[mm.lastCategoryId],
+            walletId: mm.lastWalletId == null
+                ? null
+                : walletIdMap[mm.lastWalletId],
+            pocketId: mm.lastPocketId == null
+                ? null
+                : pocketIdMap[mm.lastPocketId],
+            note: mm.lastNote,
           );
         }
 

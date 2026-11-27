@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sakuin/core/services/auto_backup_service.dart';
 import 'package:sakuin/core/services/notification_capture_service.dart';
 import 'package:sakuin/core/services/notification_service.dart';
 import 'package:sakuin/core/services/qris_sync_service.dart';
@@ -98,6 +99,7 @@ class _NavigationShellState extends ConsumerState<NavigationShell>
     await ref
         .read(notificationCaptureServiceProvider)
         .importCapturedNotifications();
+    await ref.read(autoBackupServiceProvider).runIfDue();
 
     if (settings.autoCheckUpdate) {
       final result = await updater.checkForUpdate();
