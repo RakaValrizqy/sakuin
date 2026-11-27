@@ -307,19 +307,29 @@ class QrisSyncService {
     required int walletId,
     int? categoryId,
     int? pocketId,
+    String? itemName,
   }) async {
     final fallbackCat =
         categoryId ??
         await _db.findCategoryIdByName('Makanan & Minuman', 'expense') ??
         await _db.findCategoryIdByName('Lainnya', 'expense');
+    final finalItemName = (itemName != null && itemName.trim().isNotEmpty)
+        ? itemName.trim()
+        : draft.merchantName;
+    final noteBase = 'QRIS ${draft.bankName}';
+    final note =
+        (finalItemName.toLowerCase() != draft.merchantName.toLowerCase() &&
+            draft.merchantName.toLowerCase() != 'pembayaran qris')
+        ? '$noteBase • ${draft.merchantName}'
+        : noteBase;
     await _db.saveTransactionWithMemory(
       type: 'expense',
       amount: draft.amount,
       walletId: walletId,
       categoryId: fallbackCat,
       pocketId: pocketId,
-      itemName: draft.merchantName,
-      note: 'QRIS ${draft.bankName}',
+      itemName: finalItemName,
+      note: note,
       externalRef: draft.emailUid,
       occurredAt: DateTime.fromMillisecondsSinceEpoch(draft.occurredAt)
           .toLocal(),

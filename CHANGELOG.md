@@ -1,5 +1,11 @@
 # Catatan Rilis Sakuin
 
+## v1.7.1
+### Peningkatan & Perbaikan
+- **Penggabungan Pos Budget Bernama Sama Lintas Saku:** Pos budget dengan nama yang sama di berbagai saku (mis. `Uang Harian` di Mandiri, BNI, & DANA, atau `Life Style` & `Lifestyle`) kini otomatis digabungkan menjadi **1 pilihan** di pengaturan *Safe-to-Spend* serta tampil dalam kartu **Ringkasan Pos Budget (Gabungan Semua Saku)** di tab **Dompet**.
+- **Input Nama Item + Saran Otomatis saat Simpan QRIS:** Dialog *Simpan Pengeluaran QRIS* kini dilengkapi kolom **Nama item / transaksi** beserta chip saran dari riwayat item sebelumnya (ketuk saran langsung mengisi nama, kategori, & pos budget).
+- **Pintasan Buka Setelan Terbatas (Android 13+/Xiaomi):** Menambahkan tombol pintasan langsung ke **Info Aplikasi Sakuin** di layar Auto Catat Notifikasi agar mudah membuka *Allow restricted settings* sebelum mengaktifkan Akses Notifikasi.
+
 ## v1.7.0
 ### Apa yang Baru
 - **Batas Aman Belanja Harian (*Safe-to-Spend*) di Beranda:** Menampilkan jatah belanja aman per hari (plus progres pemakaian hari ini) yang dihitung dari sisa anggaran bulanan, pos budget pilihan, atau total saldo dibagi sisa hari periode berjalan. Ketuk kartunya untuk mengganti sumber dana kapan saja.

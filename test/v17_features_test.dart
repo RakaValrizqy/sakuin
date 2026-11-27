@@ -169,5 +169,80 @@ void main() {
       expect(SpendingInsightsCalculator.heatmapLevel(100000, 100000), 2);
       expect(SpendingInsightsCalculator.heatmapLevel(200000, 100000), 3);
     });
+
+    test('groups pockets with same name across different wallets', () {
+      const pockets = [
+        PocketWithBalance(
+          pocket: WalletPocket(
+            id: 1,
+            walletId: 10,
+            name: 'Uang Harian',
+            icon: 'restaurant',
+            color: 0xFF00AA00,
+            sortOrder: 0,
+            isArchived: false,
+          ),
+          balance: 231200,
+        ),
+        PocketWithBalance(
+          pocket: WalletPocket(
+            id: 2,
+            walletId: 20,
+            name: 'uang harian',
+            icon: 'restaurant',
+            color: 0xFF00AA00,
+            sortOrder: 0,
+            isArchived: false,
+          ),
+          balance: 50000,
+        ),
+        PocketWithBalance(
+          pocket: WalletPocket(
+            id: 3,
+            walletId: 30,
+            name: 'Uang Harian',
+            icon: 'restaurant',
+            color: 0xFF00AA00,
+            sortOrder: 0,
+            isArchived: false,
+          ),
+          balance: 100000,
+        ),
+        PocketWithBalance(
+          pocket: WalletPocket(
+            id: 4,
+            walletId: 10,
+            name: 'Life Style',
+            icon: 'shopping_bag',
+            color: 0xFFAA00AA,
+            sortOrder: 1,
+            isArchived: false,
+          ),
+          balance: 200000,
+        ),
+        PocketWithBalance(
+          pocket: WalletPocket(
+            id: 5,
+            walletId: 20,
+            name: 'Lifestyle',
+            icon: 'shopping_bag',
+            color: 0xFFAA00AA,
+            sortOrder: 1,
+            isArchived: false,
+          ),
+          balance: 4500,
+        ),
+      ];
+
+      final grouped = SpendingInsightsCalculator.groupPocketsByName(pockets);
+      expect(grouped.length, 2);
+      expect(grouped[0].displayName, 'Uang Harian');
+      expect(grouped[0].totalBalance, 381200);
+      expect(grouped[0].walletCount, 3);
+      expect(grouped[0].pocketIds, {1, 2, 3});
+      expect(grouped[1].displayName, 'Life Style');
+      expect(grouped[1].totalBalance, 204500);
+      expect(grouped[1].walletCount, 2);
+    });
   });
 }

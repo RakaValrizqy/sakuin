@@ -44,6 +44,12 @@ class NotificationCaptureService {
     } catch (_) {}
   }
 
+  Future<void> openAppInfoSettings() async {
+    try {
+      await _channel.invokeMethod('openAppInfoSettings');
+    } catch (_) {}
+  }
+
   Future<bool> isEnabledInApp() async {
     try {
       final prefs = await SharedPreferences.getInstance();

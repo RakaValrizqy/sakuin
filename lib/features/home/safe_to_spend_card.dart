@@ -48,8 +48,18 @@ class SafeToSpendCard extends ConsumerWidget {
     List<PocketWithBalance> allPockets,
   ) async {
     final current = ref.read(safeToSpendConfigProvider);
+    final grouped = SpendingInsightsCalculator.groupPocketsByName(allPockets);
     var mode = current.mode;
-    final selectedIds = Set<int>.from(current.selectedPocketIds);
+
+    // Migrasi otomatis pilihan ID lama ke kunci nama pos gabungan
+    final selectedNames = Set<String>.from(current.selectedPocketNames);
+    if (selectedNames.isEmpty && current.selectedPocketIds.isNotEmpty) {
+      for (final g in grouped) {
+        if (g.pocketIds.any(current.selectedPocketIds.contains)) {
+          selectedNames.add(g.normalizedKey);
+        }
+      }
+    }
 
     final saved = await showModalBottomSheet<SafeToSpendConfig>(
       context: context,
@@ -87,12 +97,11 @@ class SafeToSpendCard extends ConsumerWidget {
                     onTap: () =>
                         setModalState(() => mode = SafeToSpendMode.budgets),
                   ),
-                  if (allPockets.isNotEmpty)
+                  if (grouped.isNotEmpty)
                     _ModeOptionTile(
                       selected: mode == SafeToSpendMode.pockets,
                       title: 'Dari Pos Budget Pilihan',
-                      subtitle:
-                          'Pilih pos tertentu (mis. Uang Harian / Life Style)',
+                      subtitle: 'Pos bernama sama lintas saku otomatis digabung jadi 1 pilihan',
                       onTap: () =>
                           setModalState(() => mode = SafeToSpendMode.pockets),
                     ),
@@ -105,26 +114,31 @@ class SafeToSpendCard extends ConsumerWidget {
                     ),
                   ),
                   if (mode == SafeToSpendMode.pockets &&
-                      allPockets.isNotEmpty) ...[
+                      grouped.isNotEmpty) ...[
                     const SizedBox(height: 8),
-                    Text('Pilih Pos Budget:', style: tt.labelMedium),
+                    Text(
+                      'Pilih Pos Budget (Gabungan Semua Saku):',
+                      style: tt.labelMedium,
+                    ),
                     const SizedBox(height: 6),
                     Wrap(
                       spacing: 8,
                       runSpacing: 6,
                       children: [
-                        for (final p in allPockets)
+                        for (final g in grouped)
                           FilterChip(
                             label: Text(
-                              '${p.pocket.name} (${CurrencyFormatter.formatCompact(p.balance)})',
+                              g.walletCount > 1
+                                  ? '${g.displayName} (${CurrencyFormatter.formatCompact(g.totalBalance)} • ${g.walletCount} saku)'
+                                  : '${g.displayName} (${CurrencyFormatter.formatCompact(g.totalBalance)})',
                             ),
-                            selected: selectedIds.contains(p.pocket.id),
+                            selected: selectedNames.contains(g.normalizedKey),
                             onSelected: (sel) {
                               setModalState(() {
                                 if (sel) {
-                                  selectedIds.add(p.pocket.id);
+                                  selectedNames.add(g.normalizedKey);
                                 } else {
-                                  selectedIds.remove(p.pocket.id);
+                                  selectedNames.remove(g.normalizedKey);
                                 }
                               });
                             },
@@ -136,13 +150,22 @@ class SafeToSpendCard extends ConsumerWidget {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton(
-                      onPressed: () => Navigator.pop(
-                        ctx,
-                        SafeToSpendConfig(
-                          mode: mode,
-                          selectedPocketIds: selectedIds,
-                        ),
-                      ),
+                      onPressed: () {
+                        final matchedIds = <int>{};
+                        for (final g in grouped) {
+                          if (selectedNames.contains(g.normalizedKey)) {
+                            matchedIds.addAll(g.pocketIds);
+                          }
+                        }
+                        Navigator.pop(
+                          ctx,
+                          SafeToSpendConfig(
+                            mode: mode,
+                            selectedPocketIds: matchedIds,
+                            selectedPocketNames: selectedNames,
+                          ),
+                        );
+                      },
                       child: const Text('Simpan Sumber'),
                     ),
                   ),
@@ -209,26 +232,37 @@ class SafeToSpendCard extends ConsumerWidget {
             ? 'Sisa Anggaran (${budgets.length} kategori)'
             : 'Belum ada anggaran';
       case SafeToSpendMode.pockets:
-        List<PocketWithBalance> chosen;
-        if (config.selectedPocketIds.isNotEmpty) {
-          chosen = allPockets
-              .where((p) => config.selectedPocketIds.contains(p.pocket.id))
+        final grouped = SpendingInsightsCalculator.groupPocketsByName(
+          allPockets,
+        );
+        List<GroupedPocketSummary> chosenGroups;
+        if (config.selectedPocketNames.isNotEmpty) {
+          chosenGroups = grouped
+              .where(
+                (g) => config.selectedPocketNames.contains(g.normalizedKey),
+              )
+              .toList();
+        } else if (config.selectedPocketIds.isNotEmpty) {
+          chosenGroups = grouped
+              .where((g) => g.pocketIds.any(config.selectedPocketIds.contains))
               .toList();
         } else {
           // Otomatis cari pos bernama Harian/Jajan/Makan; jika tak ada, gunakan semua pos
-          final dailyLike = allPockets.where((p) {
-            final n = p.pocket.name.toLowerCase();
+          final dailyLike = grouped.where((g) {
+            final n = g.displayName.toLowerCase();
             return n.contains('harian') ||
                 n.contains('jajan') ||
                 n.contains('makan') ||
                 n.contains('daily');
           }).toList();
-          chosen = dailyLike.isNotEmpty ? dailyLike : allPockets;
+          chosenGroups = dailyLike.isNotEmpty ? dailyLike : grouped;
         }
-        poolAmount = chosen.fold<int>(0, (s, p) => s + p.balance);
-        sourceLabel = chosen.length == 1
-            ? 'Pos ${chosen.first.pocket.name}'
-            : 'Pos Budget (${chosen.length} pos)';
+        poolAmount = chosenGroups.fold<int>(0, (s, g) => s + g.totalBalance);
+        sourceLabel = chosenGroups.length == 1
+            ? (chosenGroups.first.walletCount > 1
+                  ? 'Pos ${chosenGroups.first.displayName} (${chosenGroups.first.walletCount} saku)'
+                  : 'Pos ${chosenGroups.first.displayName}')
+            : 'Pos Budget (${chosenGroups.length} pos)';
       case SafeToSpendMode.totalBalance:
       case SafeToSpendMode.auto:
         poolAmount = totalBalance;

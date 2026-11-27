@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:sakuin/core/constants/app_icons.dart';
 import 'package:sakuin/core/db/app_database.dart';
 import 'package:sakuin/core/utils/amount_parser.dart';
 import 'package:sakuin/core/utils/currency_formatter.dart';
+import 'package:sakuin/core/utils/spending_insights_calculator.dart';
 import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
@@ -121,6 +123,9 @@ class _WalletListScreenState extends ConsumerState<WalletListScreen> {
     for (final p in allPockets) {
       pocketsByWallet.putIfAbsent(p.pocket.walletId, () => []).add(p);
     }
+    final groupedPockets = SpendingInsightsCalculator.groupPocketsByName(
+      allPockets,
+    );
 
     return Scaffold(
       appBar: AppBar(
@@ -206,6 +211,66 @@ class _WalletListScreenState extends ConsumerState<WalletListScreen> {
                   ),
                 ),
               ),
+              if (groupedPockets.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Ringkasan Pos Budget (Gabungan Semua Saku)',
+                              style: tt.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final g in groupedPockets)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 7,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Color(g.color)
+                                          .withValues(alpha: 0.13),
+                                      borderRadius: BorderRadius.circular(12),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          AppIcons.fromKey(g.icon),
+                                          size: 16,
+                                          color: Color(g.color),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          g.walletCount > 1
+                                              ? '${g.displayName} (${g.walletCount} saku): ${CurrencyFormatter.formatCompact(g.totalBalance)}'
+                                              : '${g.displayName}: ${CurrencyFormatter.formatCompact(g.totalBalance)}',
+                                          style: tt.labelMedium?.copyWith(
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               if (active.isNotEmpty)
                 SliverToBoxAdapter(
                   child: Padding(

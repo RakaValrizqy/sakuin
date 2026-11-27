@@ -219,6 +219,20 @@ class MainActivity : FlutterFragmentActivity() {
                             result.error("SETTINGS_ERROR", e.message, null)
                         }
                     }
+                    "openAppInfoSettings" -> {
+                        try {
+                            val intent = Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.parse("package:$packageName"),
+                            ).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Throwable) {
+                            result.error("SETTINGS_ERROR", e.message, null)
+                        }
+                    }
                     "setNotificationCaptureEnabled" -> {
                         val enabled = call.argument<Boolean>("enabled") ?: false
                         try {

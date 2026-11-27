@@ -6,14 +6,39 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 enum SafeToSpendMode { auto, budgets, pockets, totalBalance }
 
+class GroupedPocketSummary {
+  const GroupedPocketSummary({
+    required this.normalizedKey,
+    required this.displayName,
+    required this.icon,
+    required this.color,
+    required this.totalBalance,
+    required this.pocketIds,
+    required this.walletCount,
+  });
+
+  final String normalizedKey;
+  final String displayName;
+  final String icon;
+  final int color;
+  final int totalBalance;
+  final Set<int> pocketIds;
+  final int walletCount;
+}
+
 class SafeToSpendConfig {
   const SafeToSpendConfig({
     this.mode = SafeToSpendMode.auto,
     this.selectedPocketIds = const {},
+    this.selectedPocketNames = const {},
   });
 
   final SafeToSpendMode mode;
   final Set<int> selectedPocketIds;
+
+  /// Kunci nama pos yang sudah dinormalisasi (mis. 'uangharian', 'tabungan')
+  /// agar pos bernama sama di beberapa saku otomatis digabung menjadi 1 pilihan.
+  final Set<String> selectedPocketNames;
 }
 
 class SafeToSpendResult {
@@ -88,6 +113,53 @@ class SpendingInsightsCalculator {
 
   static const _kModeKey = 'sakuin_sts_mode';
   static const _kPocketsKey = 'sakuin_sts_pockets';
+  static const _kPocketNamesKey = 'sakuin_sts_pocket_names';
+
+  /// Normalisasi nama pos budget agar nama sama (termasuk beda huruf besar/spasi,
+  /// mis. "Life Style" & "Lifestyle" atau "Uang Harian" di beberapa saku) tergabung rapi.
+  static String normalizePocketGroupKey(String rawName) {
+    return rawName.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+  }
+
+  /// Gabungkan pos budget dengan nama sama di berbagai saku menjadi satu ringkasan gabungan.
+  static List<GroupedPocketSummary> groupPocketsByName(
+    List<PocketWithBalance> pockets,
+  ) {
+    final map = <String, _MutablePocketGroup>{};
+    for (final p in pockets) {
+      final key = normalizePocketGroupKey(p.pocket.name);
+      if (key.isEmpty) continue;
+      final existing = map[key];
+      if (existing == null) {
+        map[key] = _MutablePocketGroup(
+          normalizedKey: key,
+          displayName: p.pocket.name.trim(),
+          icon: p.pocket.icon,
+          color: p.pocket.color,
+          totalBalance: p.balance,
+          pocketIds: {p.pocket.id},
+          walletIds: {p.pocket.walletId},
+        );
+      } else {
+        existing.totalBalance += p.balance;
+        existing.pocketIds.add(p.pocket.id);
+        existing.walletIds.add(p.pocket.walletId);
+      }
+    }
+    return map.values
+        .map(
+          (g) => GroupedPocketSummary(
+            normalizedKey: g.normalizedKey,
+            displayName: g.displayName,
+            icon: g.icon,
+            color: g.color,
+            totalBalance: g.totalBalance,
+            pocketIds: Set<int>.unmodifiable(g.pocketIds),
+            walletCount: g.walletIds.length,
+          ),
+        )
+        .toList();
+  }
 
   static Future<SafeToSpendConfig> loadSafeToSpendConfig() async {
     try {
@@ -107,7 +179,21 @@ class SpendingInsightsCalculator {
           }
         }
       }
-      return SafeToSpendConfig(mode: mode, selectedPocketIds: ids);
+      final rawNames = prefs.getString(_kPocketNamesKey);
+      final names = <String>{};
+      if (rawNames != null && rawNames.isNotEmpty) {
+        final decoded = jsonDecode(rawNames);
+        if (decoded is List) {
+          for (final item in decoded) {
+            if (item is String && item.isNotEmpty) names.add(item);
+          }
+        }
+      }
+      return SafeToSpendConfig(
+        mode: mode,
+        selectedPocketIds: ids,
+        selectedPocketNames: names,
+      );
     } catch (_) {
       return const SafeToSpendConfig();
     }
@@ -120,6 +206,10 @@ class SpendingInsightsCalculator {
       await prefs.setString(
         _kPocketsKey,
         jsonEncode(config.selectedPocketIds.toList()),
+      );
+      await prefs.setString(
+        _kPocketNamesKey,
+        jsonEncode(config.selectedPocketNames.toList()),
       );
     } catch (_) {}
   }
@@ -314,4 +404,24 @@ class SpendingInsightsCalculator {
     if (ratio <= 1.35) return 2;
     return 3;
   }
+}
+
+class _MutablePocketGroup {
+  _MutablePocketGroup({
+    required this.normalizedKey,
+    required this.displayName,
+    required this.icon,
+    required this.color,
+    required this.totalBalance,
+    required this.pocketIds,
+    required this.walletIds,
+  });
+
+  final String normalizedKey;
+  final String displayName;
+  final String icon;
+  final int color;
+  int totalBalance;
+  final Set<int> pocketIds;
+  final Set<int> walletIds;
 }

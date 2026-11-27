@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:sakuin/core/db/app_database.dart';
+import 'package:sakuin/core/db/db_provider.dart';
 import 'package:sakuin/core/services/notification_capture_service.dart';
 import 'package:sakuin/core/services/qris_sync_service.dart';
 import 'package:sakuin/core/services/settings_service.dart';
+import 'package:sakuin/core/utils/currency_formatter.dart';
 import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/utils/haptics.dart';
 import 'package:sakuin/core/utils/receipt_parser.dart';
@@ -343,6 +345,20 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
         ? expenseCategories.first.id
         : null;
 
+    final isGenericMerchant =
+        draft.merchantName.trim().toLowerCase() == 'pembayaran qris' ||
+        draft.merchantName.trim().toLowerCase().startsWith('transaksi ');
+    final itemCtrl = TextEditingController(
+      text: isGenericMerchant ? '' : draft.merchantName,
+    );
+    final itemHistory = await ref
+        .read(appDatabaseProvider)
+        .searchItemMemory('', type: 'expense', limit: 30);
+    if (!mounted) {
+      itemCtrl.dispose();
+      return;
+    }
+
     final confirmed = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
@@ -357,8 +373,25 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
             pocketId = null;
           }
 
-          return Padding(
-            padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
+          final q = itemCtrl.text.trim().toLowerCase();
+          final suggestions = q.isEmpty
+              ? itemHistory.take(6).toList()
+              : itemHistory
+                    .where(
+                      (m) =>
+                          m.displayName.toLowerCase().contains(q) &&
+                          m.displayName.toLowerCase() != q,
+                    )
+                    .take(6)
+                    .toList();
+
+          return SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              4,
+              20,
+              MediaQuery.of(ctx).viewInsets.bottom + 24,
+            ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -379,6 +412,66 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                   style: Theme.of(ctx).textTheme.headlineSmall,
                 ),
                 const SizedBox(height: 14),
+                TextField(
+                  controller: itemCtrl,
+                  textCapitalization: TextCapitalization.sentences,
+                  onChanged: (_) => setModalState(() {}),
+                  decoration: InputDecoration(
+                    labelText: 'Nama item / transaksi',
+                    hintText: 'Contoh: Kopi susu, Makan siang, Parkir',
+                    prefixIcon: const Icon(Icons.edit_note_rounded),
+                    suffixIcon: itemCtrl.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear_rounded),
+                            onPressed: () => setModalState(() {
+                              itemCtrl.clear();
+                            }),
+                          )
+                        : null,
+                  ),
+                ),
+                if (suggestions.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 36,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: suggestions.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 6),
+                      itemBuilder: (_, idx) {
+                        final item = suggestions[idx];
+                        return ActionChip(
+                          visualDensity: VisualDensity.compact,
+                          label: Text(
+                            item.lastAmount > 0
+                                ? '${item.displayName} • ${CurrencyFormatter.formatCompact(item.lastAmount)}'
+                                : item.displayName,
+                            style: Theme.of(ctx).textTheme.labelSmall,
+                          ),
+                          onPressed: () => setModalState(() {
+                            itemCtrl.text = item.displayName;
+                            itemCtrl.selection = TextSelection.collapsed(
+                              offset: item.displayName.length,
+                            );
+                            if (item.lastCategoryId != null &&
+                                expenseCategories.any(
+                                  (c) => c.id == item.lastCategoryId,
+                                )) {
+                              categoryId = item.lastCategoryId;
+                            }
+                            if (item.lastPocketId != null &&
+                                walletPockets.any(
+                                  (p) => p.pocket.id == item.lastPocketId,
+                                )) {
+                              pocketId = item.lastPocketId;
+                            }
+                          }),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
                   initialValue: walletId,
                   decoration: const InputDecoration(labelText: 'Dompet / Saku'),
@@ -443,6 +536,9 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
       ),
     );
 
+    final chosenItemName = itemCtrl.text.trim();
+    itemCtrl.dispose();
+
     if (confirmed == true) {
       await ref
           .read(qrisSyncServiceProvider)
@@ -451,6 +547,7 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
             walletId: walletId,
             categoryId: categoryId,
             pocketId: pocketId,
+            itemName: chosenItemName.isEmpty ? null : chosenItemName,
           );
       AppHaptics.medium(ref.read(settingsProvider).hapticsEnabled);
     }
@@ -616,28 +713,54 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                           if (notifStatus?.enabledInApp == true &&
                               !(notifStatus?.osPermissionGranted ?? false))
                             Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                              child: SizedBox(
-                                width: double.infinity,
-                                child: FilledButton.tonalIcon(
-                                  onPressed: () async {
-                                    await ref
-                                        .read(
-                                          notificationCaptureServiceProvider,
-                                        )
-                                        .openOsListenerSettings();
-                                    ref.invalidate(
-                                      notificationCaptureStatusProvider,
-                                    );
-                                  },
-                                  icon: const Icon(
-                                    Icons.settings_applications_outlined,
-                                    size: 18,
+                              padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  Text(
+                                    'Jika muncul "Restricted setting" (Android 13+/Xiaomi): buka Info Aplikasi dulu → ketuk titik 3 (⋮) kanan atas atau gulir paling bawah → aktifkan "Izinkan setelan terbatas / Allow restricted settings", baru aktifkan Akses Notifikasi.',
+                                    style: tt.bodySmall?.copyWith(
+                                      color: cs.onSurfaceVariant,
+                                    ),
                                   ),
-                                  label: const Text(
-                                    'Buka Izin Akses Notifikasi Android',
+                                  const SizedBox(height: 8),
+                                  OutlinedButton.icon(
+                                    onPressed: () async {
+                                      await ref
+                                          .read(
+                                            notificationCaptureServiceProvider,
+                                          )
+                                          .openAppInfoSettings();
+                                    },
+                                    icon: const Icon(
+                                      Icons.admin_panel_settings_outlined,
+                                      size: 18,
+                                    ),
+                                    label: const Text(
+                                      '1. Buka Info Aplikasi (Izinkan Setelan Terbatas)',
+                                    ),
                                   ),
-                                ),
+                                  const SizedBox(height: 6),
+                                  FilledButton.tonalIcon(
+                                    onPressed: () async {
+                                      await ref
+                                          .read(
+                                            notificationCaptureServiceProvider,
+                                          )
+                                          .openOsListenerSettings();
+                                      ref.invalidate(
+                                        notificationCaptureStatusProvider,
+                                      );
+                                    },
+                                    icon: const Icon(
+                                      Icons.settings_applications_outlined,
+                                      size: 18,
+                                    ),
+                                    label: const Text(
+                                      '2. Buka Izin Akses Notifikasi Android',
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                         ],
