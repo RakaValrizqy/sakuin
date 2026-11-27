@@ -1403,6 +1403,12 @@ FROM wallet_pockets p
     );
   }
 
+  Stream<List<Transaction>> watchTransactionsForDay(int dayKey) {
+    return (select(
+      transactions,
+    )..where((t) => t.dayKey.equals(dayKey))).watch();
+  }
+
   Future<PeriodSummary> getPeriodSummary(int startDayKey, int endDayKey) async {
     final r = await customSelect(
       '''

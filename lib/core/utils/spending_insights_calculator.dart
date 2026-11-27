@@ -250,6 +250,51 @@ class SpendingInsightsCalculator {
     );
   }
 
+  /// Hitung total pengeluaran hari ini yang benar-benar berasal dari sumber dana
+  /// Safe-to-Spend yang dipilih (mis. hanya transaksi dari Pos Uang Harian jika sumbernya
+  /// Pos Uang Harian — transaksi dari pos lain seperti Date / Tabungan tidak mengurangi jatah).
+  static int computeSpentToday({
+    required List<Transaction> todayTransactions,
+    required SafeToSpendMode effectiveMode,
+    Set<int>? chosenPocketIds,
+    Set<int>? budgetedCategoryIds,
+    bool hasGlobalBudget = false,
+    Set<int>? includedWalletIds,
+  }) {
+    var total = 0;
+    for (final tx in todayTransactions) {
+      final isExpense = tx.type == 'expense';
+      final isTransferWithFee = tx.type == 'transfer' && tx.fee > 0;
+      if (!isExpense && !isTransferWithFee) continue;
+
+      switch (effectiveMode) {
+        case SafeToSpendMode.pockets:
+          if (chosenPocketIds == null || chosenPocketIds.isEmpty) continue;
+          if (tx.pocketId == null || !chosenPocketIds.contains(tx.pocketId)) {
+            continue;
+          }
+          total += isExpense ? tx.amount : tx.fee;
+        case SafeToSpendMode.budgets:
+          if (hasGlobalBudget) {
+            total += isExpense ? tx.amount : tx.fee;
+          } else if (isExpense &&
+              budgetedCategoryIds != null &&
+              tx.categoryId != null &&
+              budgetedCategoryIds.contains(tx.categoryId)) {
+            total += tx.amount;
+          }
+        case SafeToSpendMode.totalBalance:
+        case SafeToSpendMode.auto:
+          if (includedWalletIds != null &&
+              !includedWalletIds.contains(tx.walletId)) {
+            continue;
+          }
+          total += isExpense ? tx.amount : tx.fee;
+      }
+    }
+    return total;
+  }
+
   /// Hitung insight periode: jumlah No-Spend Day, hari paling boros, item tersering,
   /// proyeksi akhir periode, serta kategori paling naik & paling turun dibanding periode lalu.
   static PeriodInsights computePeriodInsights({

@@ -244,5 +244,102 @@ void main() {
       expect(grouped[1].totalBalance, 204500);
       expect(grouped[1].walletCount, 2);
     });
+
+    test(
+      'computes spentToday strictly scoped to selected Safe-to-Spend source',
+      () {
+        Transaction makeTx({
+          required int id,
+          required String type,
+          required int amount,
+          required int walletId,
+          int? categoryId,
+          int? pocketId,
+          int fee = 0,
+        }) => Transaction(
+          id: id,
+          type: type,
+          amount: amount,
+          categoryId: categoryId,
+          walletId: walletId,
+          toWalletId: type == 'transfer' ? 2 : null,
+          pocketId: pocketId,
+          toPocketId: null,
+          fee: fee,
+          note: '',
+          itemName: null,
+          splitGroupId: null,
+          externalRef: null,
+          occurredAt: 0,
+          dayKey: 20261127,
+          createdAt: 0,
+          updatedAt: 0,
+        );
+
+        final todayTxs = [
+          // Pengeluaran dari Pos Uang Harian (pocketId = 1)
+          makeTx(
+            id: 1,
+            type: 'expense',
+            amount: 22000,
+            walletId: 10,
+            categoryId: 1,
+            pocketId: 1,
+          ),
+          // Pengeluaran Gojek Sipa dari Pos Date (pocketId = 2) -> TIDAK boleh kurangi Uang Harian
+          makeTx(
+            id: 2,
+            type: 'expense',
+            amount: 20000,
+            walletId: 20,
+            categoryId: 2,
+            pocketId: 2,
+          ),
+          // Transfer dari Pos Date dengan biaya admin 1.200 -> TIDAK boleh kurangi Uang Harian
+          makeTx(
+            id: 3,
+            type: 'transfer',
+            amount: 50000,
+            walletId: 10,
+            pocketId: 2,
+            fee: 1200,
+          ),
+          // Pengeluaran dari dompet yang dikecualikan dari total saldo (walletId = 99)
+          makeTx(
+            id: 4,
+            type: 'expense',
+            amount: 15000,
+            walletId: 99,
+            categoryId: 3,
+            pocketId: null,
+          ),
+        ];
+
+        // 1. Mode Pos Budget: hanya Pos Uang Harian (pocketId = 1)
+        final pocketSpent = SpendingInsightsCalculator.computeSpentToday(
+          todayTransactions: todayTxs,
+          effectiveMode: SafeToSpendMode.pockets,
+          chosenPocketIds: {1},
+        );
+        expect(pocketSpent, 22000);
+
+        // 2. Mode Anggaran per kategori (hanya kategori 1 & 2, bukan 3)
+        final budgetSpent = SpendingInsightsCalculator.computeSpentToday(
+          todayTransactions: todayTxs,
+          effectiveMode: SafeToSpendMode.budgets,
+          budgetedCategoryIds: {1, 2},
+          hasGlobalBudget: false,
+        );
+        expect(budgetSpent, 42000);
+
+        // 3. Mode Total Saldo Aktif (hanya wallet 10 & 20, tidak termasuk wallet 99)
+        final totalBalSpent = SpendingInsightsCalculator.computeSpentToday(
+          todayTransactions: todayTxs,
+          effectiveMode: SafeToSpendMode.totalBalance,
+          includedWalletIds: {10, 20},
+        );
+        expect(totalBalSpent, 43200);
+      },
+    );
   });
 }

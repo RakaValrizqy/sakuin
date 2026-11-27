@@ -12,6 +12,7 @@ import 'package:sakuin/core/utils/haptics.dart';
 import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
 import 'package:sakuin/core/widgets/nominal_shortcut_bar.dart';
+import 'package:sakuin/features/category/category_form_sheet.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
 import 'package:sakuin/features/wallet/income_allocation_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_form_sheet.dart';
@@ -240,6 +241,21 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
 
   int get _parsedAmount => AmountParser.parse(_amountCtrl.text) ?? 0;
 
+  Future<void> _createCategory() async {
+    FocusScope.of(context).unfocus();
+    final newId = await showCategoryFormSheet(
+      context,
+      initialType: _type == 'income' ? 'income' : 'expense',
+    );
+    if (newId == null || !mounted) return;
+    await _loadCategories();
+    if (!mounted) return;
+    if (_orderedCategories.any((c) => c.id == newId)) {
+      AppHaptics.selection(ref.read(settingsProvider).hapticsEnabled);
+      setState(() => _categoryId = newId);
+    }
+  }
+
   Future<void> _pickAllCategories() async {
     final selected = await showModalBottomSheet<int>(
       context: context,
@@ -247,7 +263,21 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
         padding: const EdgeInsets.all(16),
         shrinkWrap: true,
         children: [
-          Text('Pilih Kategori', style: Theme.of(ctx).textTheme.titleLarge),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Pilih Kategori',
+                  style: Theme.of(ctx).textTheme.titleLarge,
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => Navigator.pop(ctx, -1),
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('Tambah'),
+              ),
+            ],
+          ),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -270,7 +300,9 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
         ],
       ),
     );
-    if (selected != null) {
+    if (selected == -1) {
+      await _createCategory();
+    } else if (selected != null) {
       setState(() => _categoryId = selected);
     }
   }
@@ -685,6 +717,15 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                           label: const Text('Lainnya...'),
                           onPressed: _pickAllCategories,
                         ),
+                      ActionChip(
+                        avatar: Icon(
+                          Icons.add_rounded,
+                          size: 18,
+                          color: cs.primary,
+                        ),
+                        label: const Text('Tambah Kategori'),
+                        onPressed: _createCategory,
+                      ),
                     ],
                   ),
                   const SizedBox(height: 14),

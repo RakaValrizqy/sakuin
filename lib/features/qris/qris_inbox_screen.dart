@@ -10,6 +10,7 @@ import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/utils/haptics.dart';
 import 'package:sakuin/core/utils/receipt_parser.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
+import 'package:sakuin/features/category/category_form_sheet.dart';
 import 'package:sakuin/features/category/category_providers.dart';
 import 'package:sakuin/features/receipt/split_bill_screen.dart';
 import 'package:sakuin/features/transaction/split_transaction_sheet.dart';
@@ -341,8 +342,9 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
         ? draft.suggestedWalletId!
         : wallets.first.wallet.id;
     int? pocketId;
-    int? categoryId = expenseCategories.isNotEmpty
-        ? expenseCategories.first.id
+    var modalCategories = List<Category>.from(expenseCategories);
+    int? categoryId = modalCategories.isNotEmpty
+        ? modalCategories.first.id
         : null;
 
     final isGenericMerchant =
@@ -454,7 +456,7 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                               offset: item.displayName.length,
                             );
                             if (item.lastCategoryId != null &&
-                                expenseCategories.any(
+                                modalCategories.any(
                                   (c) => c.id == item.lastCategoryId,
                                 )) {
                               categoryId = item.lastCategoryId;
@@ -511,14 +513,55 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                   ),
                 ],
                 const SizedBox(height: 10),
-                DropdownButtonFormField<int?>(
-                  initialValue: categoryId,
-                  decoration: const InputDecoration(labelText: 'Kategori'),
-                  items: [
-                    for (final c in expenseCategories)
-                      DropdownMenuItem<int?>(value: c.id, child: Text(c.name)),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<int?>(
+                        key: ValueKey(
+                          'qris_cat_${modalCategories.length}_$categoryId',
+                        ),
+                        initialValue:
+                            modalCategories.any((c) => c.id == categoryId)
+                            ? categoryId
+                            : (modalCategories.isNotEmpty
+                                  ? modalCategories.first.id
+                                  : null),
+                        decoration: const InputDecoration(
+                          labelText: 'Kategori',
+                        ),
+                        items: [
+                          for (final c in modalCategories)
+                            DropdownMenuItem<int?>(
+                              value: c.id,
+                              child: Text(c.name),
+                            ),
+                        ],
+                        onChanged: (v) => setModalState(() => categoryId = v),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    IconButton.filledTonal(
+                      tooltip: 'Tambah kategori',
+                      icon: const Icon(Icons.add_rounded),
+                      onPressed: () async {
+                        final newId = await showCategoryFormSheet(
+                          ctx,
+                          initialType: 'expense',
+                        );
+                        if (newId == null) return;
+                        final refreshed = await ref
+                            .read(appDatabaseProvider)
+                            .getCategoriesByRecentUsage('expense');
+                        setModalState(() {
+                          modalCategories = refreshed;
+                          if (modalCategories.any((c) => c.id == newId)) {
+                            categoryId = newId;
+                          }
+                        });
+                      },
+                    ),
                   ],
-                  onChanged: (v) => setModalState(() => categoryId = v),
                 ),
                 const SizedBox(height: 18),
                 SizedBox(

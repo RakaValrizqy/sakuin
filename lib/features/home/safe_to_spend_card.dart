@@ -31,12 +31,10 @@ class SafeToSpendConfigNotifier extends StateNotifier<SafeToSpendConfig> {
   }
 }
 
-final todayExpenseProvider = StreamProvider<int>((ref) {
+final todayTransactionsProvider = StreamProvider<List<Transaction>>((ref) {
   final db = ref.watch(appDatabaseProvider);
   final todayKey = AppDateUtils.toDayKey(DateTime.now());
-  return db
-      .watchPeriodSummary(todayKey, todayKey)
-      .map((summary) => summary.expense);
+  return db.watchTransactionsForDay(todayKey);
 });
 
 class SafeToSpendCard extends ConsumerWidget {
@@ -186,11 +184,14 @@ class SafeToSpendCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final config = ref.watch(safeToSpendConfigProvider);
     final totalBalance = ref.watch(totalBalanceProvider);
+    final wallets =
+        ref.watch(walletsWithBalancesProvider).valueOrNull ?? const [];
     final allPockets =
         ref.watch(allActivePocketsProvider).valueOrNull ?? const [];
     final budgets =
         ref.watch(budgetProgressListProvider).valueOrNull ?? const [];
-    final spentToday = ref.watch(todayExpenseProvider).valueOrNull ?? 0;
+    final todayTxs =
+        ref.watch(todayTransactionsProvider).valueOrNull ?? const [];
     final hideBalances = ref.watch(
       settingsProvider.select((s) => s.hideBalances),
     );
@@ -213,9 +214,18 @@ class SafeToSpendCard extends ConsumerWidget {
             (sum, b) => sum + (b.remaining < 0 ? 0 : b.remaining),
           );
     final hasBudgets = budgets.isNotEmpty;
+    final budgetedCategoryIds = budgets
+        .map((b) => b.budget.categoryId)
+        .whereType<int>()
+        .toSet();
+    final includedWalletIds = wallets
+        .where((w) => w.wallet.includeInTotal && !w.wallet.isArchived)
+        .map((w) => w.wallet.id)
+        .toSet();
 
     int poolAmount;
     String sourceLabel;
+    Set<int> chosenPocketIds = const {};
 
     final effectiveMode = config.mode == SafeToSpendMode.auto
         ? (hasBudgets
@@ -257,6 +267,7 @@ class SafeToSpendCard extends ConsumerWidget {
           }).toList();
           chosenGroups = dailyLike.isNotEmpty ? dailyLike : grouped;
         }
+        chosenPocketIds = chosenGroups.expand((g) => g.pocketIds).toSet();
         poolAmount = chosenGroups.fold<int>(0, (s, g) => s + g.totalBalance);
         sourceLabel = chosenGroups.length == 1
             ? (chosenGroups.first.walletCount > 1
@@ -268,6 +279,15 @@ class SafeToSpendCard extends ConsumerWidget {
         poolAmount = totalBalance;
         sourceLabel = 'Total Saldo Aktif';
     }
+
+    final spentToday = SpendingInsightsCalculator.computeSpentToday(
+      todayTransactions: todayTxs,
+      effectiveMode: effectiveMode,
+      chosenPocketIds: chosenPocketIds,
+      budgetedCategoryIds: budgetedCategoryIds,
+      hasGlobalBudget: globalBudget != null,
+      includedWalletIds: includedWalletIds,
+    );
 
     final result = SpendingInsightsCalculator.calculateSafeToSpend(
       now: now,

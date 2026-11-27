@@ -1,5 +1,10 @@
 # Catatan Rilis Sakuin
 
+## v1.7.3
+### Peningkatan & Perbaikan
+- **Opsi Tambah Kategori Langsung Saat Catat Transaksi & Simpan QRIS:** Menambahkan tombol **`+ Tambah Kategori`** langsung pada pilihan kategori di layar **Catat Transaksi** (dan di dalam modal *Lainnya...*) serta tombol **`+`** di sebelah pilihan kategori pada dialog **Simpan Pengeluaran QRIS** — kategori baru langsung tersimpan dan otomatis terpilih tanpa harus keluar dari form.
+- **Perbaikan Perhitungan *Terpakai Hari Ini* di *Safe-to-Spend*:** Pengeluaran hari ini pada kartu **Aman Dipakai Hari Ini** kini dihitung khusus dari sumber dana yang dipilih (mis. jika sumbernya **Pos Uang Harian**, transaksi yang memakai pos lain seperti **Date**, **Tabungan**, **Lifestyle**, atau biaya admin transfer dari pos lain tidak lagi mengurangi jatah *Safe-to-Spend* harian).
+
 ## v1.7.2
 ### Perbaikan & Peningkatan
 - **Perbaikan Pos Budget "Hantu" dari Dompet Arsip:** Memperbaiki query daftar pos aktif agar pos budget milik dompet yang sudah diarsipkan tidak lagi ikut terhitung di Ringkasan Pos Budget (tab Dompet) maupun di *Safe-to-Spend*.
