@@ -601,8 +601,8 @@ FROM wallet_pockets p
 
   Stream<List<PocketWithBalance>> watchAllActivePockets() {
     return customSelect(
-      '$_pocketBalanceSql WHERE p.is_archived = 0 ORDER BY p.wallet_id ASC, p.sort_order ASC, p.id ASC',
-      readsFrom: {walletPockets, pocketAllocations, transactions},
+      '$_pocketBalanceSql INNER JOIN wallets w ON w.id = p.wallet_id WHERE p.is_archived = 0 AND w.is_archived = 0 ORDER BY p.wallet_id ASC, p.sort_order ASC, p.id ASC',
+      readsFrom: {wallets, walletPockets, pocketAllocations, transactions},
     ).watch().map((rows) => rows.map(_mapPocketBalanceRow).toList());
   }
 

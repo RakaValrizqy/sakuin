@@ -11,8 +11,8 @@ import 'package:sakuin/core/utils/date_utils.dart';
 import 'package:sakuin/core/utils/haptics.dart';
 import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
+import 'package:sakuin/core/widgets/nominal_shortcut_bar.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
-import 'package:sakuin/features/transaction/widgets/custom_keypad.dart';
 import 'package:sakuin/features/wallet/income_allocation_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_form_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_providers.dart';
@@ -62,10 +62,11 @@ class TransactionFormSheet extends ConsumerStatefulWidget {
 
 class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
   late String _type; // 'expense' | 'income' | 'transfer'
-  String _rawAmount = '';
+  final _amountCtrl = TextEditingController();
   final _itemCtrl = TextEditingController();
   final _noteCtrl = TextEditingController();
   final _feeCtrl = TextEditingController();
+  final _amountFocus = FocusNode();
   final _itemFocus = FocusNode();
 
   int? _categoryId;
@@ -75,7 +76,6 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
   int? _toPocketId;
   late DateTime _occurredAt;
   bool _showNoteField = false;
-  bool _showKeypad = true;
   bool _saving = false;
 
   /// Khusus pemasukan baru di saku yang punya pos budget: langsung buka opsi bagi persentase (%)
@@ -85,6 +85,16 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
   List<Category> _orderedCategories = [];
   List<ItemMemoryData> _suggestions = [];
 
+  void _setAmountValue(int amount) {
+    final text = amount > 0
+        ? CurrencyFormatter.format(amount, withSymbol: false)
+        : '';
+    _amountCtrl.value = TextEditingValue(
+      text: text,
+      selection: TextSelection.collapsed(offset: text.length),
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -93,10 +103,12 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
     if (widget.existing != null) {
       final tx = widget.existing!.transaction;
       _type = tx.type;
-      _rawAmount = tx.amount.toString();
+      _setAmountValue(tx.amount);
       _itemCtrl.text = tx.itemName ?? '';
       _noteCtrl.text = tx.note;
-      _feeCtrl.text = tx.fee > 0 ? tx.fee.toString() : '';
+      _feeCtrl.text = tx.fee > 0
+          ? CurrencyFormatter.format(tx.fee, withSymbol: false)
+          : '';
       _categoryId = tx.categoryId;
       _walletId = tx.walletId;
       _toWalletId = tx.toWalletId;
@@ -105,14 +117,15 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _occurredAt = DateTime.fromMillisecondsSinceEpoch(tx.occurredAt)
           .toLocal();
       _showNoteField = tx.note.isNotEmpty;
-      _showKeypad = false;
     } else if (widget.duplicateFrom != null) {
       final tx = widget.duplicateFrom!.transaction;
       _type = tx.type;
-      _rawAmount = tx.amount.toString();
+      _setAmountValue(tx.amount);
       _itemCtrl.text = tx.itemName ?? '';
       _noteCtrl.text = tx.note;
-      _feeCtrl.text = tx.fee > 0 ? tx.fee.toString() : '';
+      _feeCtrl.text = tx.fee > 0
+          ? CurrencyFormatter.format(tx.fee, withSymbol: false)
+          : '';
       _categoryId = tx.categoryId;
       _walletId = tx.walletId;
       _toWalletId = tx.toWalletId;
@@ -120,11 +133,10 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _toPocketId = tx.toPocketId;
       _occurredAt = DateTime.now();
       _showNoteField = tx.note.isNotEmpty;
-      _showKeypad = false;
     } else if (widget.prefillItem != null) {
       final item = widget.prefillItem!;
       _type = item.type;
-      _rawAmount = item.lastAmount.toString();
+      _setAmountValue(item.lastAmount);
       _itemCtrl.text = item.displayName;
       _noteCtrl.text = item.lastNote;
       _categoryId = item.lastCategoryId;
@@ -132,17 +144,10 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _pocketId = item.lastPocketId;
       _occurredAt = DateTime.now();
       _showNoteField = item.lastNote.isNotEmpty;
-      _showKeypad = false;
     } else {
       _type = widget.initialType;
       _walletId = ref.read(settingsProvider).lastWalletId;
     }
-
-    _itemFocus.addListener(() {
-      if (_itemFocus.hasFocus && _showKeypad) {
-        setState(() => _showKeypad = false);
-      }
-    });
 
     _loadCategories();
     _loadSuggestions('');
@@ -150,9 +155,11 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
 
   @override
   void dispose() {
+    _amountCtrl.dispose();
     _itemCtrl.dispose();
     _noteCtrl.dispose();
     _feeCtrl.dispose();
+    _amountFocus.dispose();
     _itemFocus.dispose();
     super.dispose();
   }
@@ -191,14 +198,13 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
     setState(() {
       _type = item.type;
       _itemCtrl.text = item.displayName;
-      _rawAmount = item.lastAmount.toString();
+      _setAmountValue(item.lastAmount);
       if (item.lastCategoryId != null) _categoryId = item.lastCategoryId;
       if (item.lastWalletId != null) _walletId = item.lastWalletId;
       _pocketId = item.lastPocketId;
       _noteCtrl.text = item.lastNote;
       if (item.lastNote.isNotEmpty) _showNoteField = true;
       _suggestions = [];
-      _showKeypad = false;
     });
   }
 
@@ -215,10 +221,12 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
     AppHaptics.selection(ref.read(settingsProvider).hapticsEnabled);
     setState(() {
       _type = tx.type;
-      _rawAmount = tx.amount.toString();
+      _setAmountValue(tx.amount);
       _itemCtrl.text = tx.itemName ?? '';
       _noteCtrl.text = tx.note;
-      _feeCtrl.text = tx.fee > 0 ? tx.fee.toString() : '';
+      _feeCtrl.text = tx.fee > 0
+          ? CurrencyFormatter.format(tx.fee, withSymbol: false)
+          : '';
       _categoryId = tx.categoryId;
       _walletId = tx.walletId;
       _toWalletId = tx.toWalletId;
@@ -226,47 +234,11 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
       _toPocketId = tx.toPocketId;
       _occurredAt = DateTime.now();
       _showNoteField = tx.note.isNotEmpty;
-      _showKeypad = false;
     });
     await _loadCategories();
   }
 
-  int get _parsedAmount => AmountParser.parse(_rawAmount) ?? 0;
-
-  void _onKeypadInput(String token) {
-    setState(() {
-      if (_rawAmount.length > 24) return;
-      // Cegah dua operator berurutan
-      const ops = ['+', '−', '×', '÷'];
-      if (ops.contains(token)) {
-        if (_rawAmount.isEmpty) return;
-        final last = _rawAmount[_rawAmount.length - 1];
-        if (ops.contains(last)) {
-          _rawAmount = _rawAmount.substring(0, _rawAmount.length - 1) + token;
-          return;
-        }
-      }
-      _rawAmount += token;
-    });
-  }
-
-  void _onKeypadBackspace() {
-    if (_rawAmount.isEmpty) return;
-    setState(() {
-      if (_rawAmount.endsWith('jt')) {
-        _rawAmount = _rawAmount.substring(0, _rawAmount.length - 2);
-      } else {
-        _rawAmount = _rawAmount.substring(0, _rawAmount.length - 1);
-      }
-    });
-  }
-
-  void _onKeypadEvaluate() {
-    final val = AmountParser.parse(_rawAmount);
-    if (val != null) {
-      setState(() => _rawAmount = val.toString());
-    }
-  }
+  int get _parsedAmount => AmountParser.parse(_amountCtrl.text) ?? 0;
 
   Future<void> _pickAllCategories() async {
     final selected = await showModalBottomSheet<int>(
@@ -568,103 +540,70 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                 ),
                 const SizedBox(height: 12),
 
-                // 2. Display Nominal Pintar (ketuk untuk buka/tutup keypad kustom)
-                InkWell(
-                  borderRadius: BorderRadius.circular(18),
-                  onTap: () {
-                    FocusScope.of(context).unfocus();
-                    setState(() => _showKeypad = !_showKeypad);
-                  },
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 18,
-                      vertical: 14,
+                // 2. Input Nominal langsung memakai Numpad bawaan HP + Bar Shortcut (rb / jt / +10 rb)
+                Container(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                  decoration: BoxDecoration(
+                    color: accentColor.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: accentColor.withValues(alpha: 0.45),
+                      width: 1.4,
                     ),
-                    decoration: BoxDecoration(
-                      color: accentColor.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: _showKeypad
-                            ? accentColor
-                            : accentColor.withValues(alpha: 0.35),
-                        width: _showKeypad ? 2 : 1,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Nominal',
+                        style: tt.labelMedium?.copyWith(color: accentColor),
                       ),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Text(
-                              'Nominal',
-                              style: tt.labelMedium?.copyWith(
-                                color: accentColor,
-                              ),
-                            ),
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _showKeypad
-                                      ? Icons.keyboard_hide_rounded
-                                      : Icons.dialpad_rounded,
-                                  size: 18,
-                                  color: accentColor,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  _showKeypad ? 'Sembunyikan' : 'Keypad',
-                                  style: tt.labelSmall?.copyWith(
-                                    color: accentColor,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
+                      TextField(
+                        controller: _amountCtrl,
+                        focusNode: _amountFocus,
+                        autofocus:
+                            !isEdit &&
+                            widget.duplicateFrom == null &&
+                            widget.prefillItem == null,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [ThousandsSeparatorInputFormatter()],
+                        textAlign: TextAlign.right,
+                        style: tt.headlineMedium?.copyWith(
+                          fontSize: 30,
+                          fontWeight: FontWeight.w800,
+                          color: accentColor,
+                          fontFeatures: const [FontFeature.tabularFigures()],
                         ),
-                        const SizedBox(height: 4),
-                        FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerRight,
-                          child: Text(
-                            CurrencyFormatter.format(_parsedAmount),
-                            style: tt.headlineMedium?.copyWith(
-                              fontSize: 32,
-                              fontWeight: FontWeight.w800,
-                              color: accentColor,
-                              fontFeatures: const [
-                                FontFeature.tabularFigures(),
-                              ],
-                            ),
+                        decoration: InputDecoration(
+                          prefixText: 'Rp ',
+                          prefixStyle: tt.titleLarge?.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: accentColor.withValues(alpha: 0.8),
+                          ),
+                          hintText: '0',
+                          hintStyle: tt.headlineMedium?.copyWith(
+                            fontSize: 30,
+                            fontWeight: FontWeight.w800,
+                            color: accentColor.withValues(alpha: 0.35),
+                          ),
+                          border: InputBorder.none,
+                          filled: false,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 4,
                           ),
                         ),
-                        if (_rawAmount.isNotEmpty &&
-                            (AmountParser.hasExpression(_rawAmount) ||
-                                _rawAmount.contains('k') ||
-                                _rawAmount.contains('jt')))
-                          Text(
-                            _rawAmount,
-                            style: tt.bodySmall?.copyWith(
-                              color: cs.onSurfaceVariant,
-                            ),
-                          ),
-                      ],
-                    ),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                      const SizedBox(height: 8),
+                      NominalShortcutBar(
+                        controller: _amountCtrl,
+                        hapticsEnabled: haptics,
+                        onChanged: () => setState(() {}),
+                      ),
+                    ],
                   ),
                 ),
-
-                if (_showKeypad) ...[
-                  const SizedBox(height: 10),
-                  CustomAmountKeypad(
-                    onInput: _onKeypadInput,
-                    onBackspace: _onKeypadBackspace,
-                    onClear: () => setState(() => _rawAmount = ''),
-                    onEvaluate: _onKeypadEvaluate,
-                    hapticsEnabled: haptics,
-                    showEvaluate: AmountParser.hasExpression(_rawAmount),
-                  ),
-                ],
                 const SizedBox(height: 14),
 
                 // 3. Nama Item + Autocomplete Item Memory (untuk Pengeluaran / Pemasukan)
@@ -1061,7 +1000,6 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                     child: TextButton.icon(
                       onPressed: () => setState(() {
                         _showNoteField = true;
-                        _showKeypad = false;
                       }),
                       icon: const Icon(Icons.notes_rounded, size: 18),
                       label: const Text('Tambah catatan'),

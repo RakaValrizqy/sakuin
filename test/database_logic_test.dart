@@ -462,6 +462,62 @@ void main() {
         125000,
       );
     });
+
+    test(
+      'watchAllActivePockets mengabaikan pos dari dompet yang sudah diarsipkan',
+      () async {
+        final aktifId = await createWallet('Mandiri', 500000);
+        final arsipId = await createWallet('Dompet Lama', 800000);
+
+        final tabAktifId = await db
+            .into(db.walletPockets)
+            .insert(
+              WalletPocketsCompanion.insert(
+                walletId: aktifId,
+                name: 'Tabungan',
+                icon: 'savings',
+                color: 0xFF15803D,
+              ),
+            );
+        final tabArsipId = await db
+            .into(db.walletPockets)
+            .insert(
+              WalletPocketsCompanion.insert(
+                walletId: arsipId,
+                name: 'Tabungan',
+                icon: 'savings',
+                color: 0xFF15803D,
+              ),
+            );
+
+        await db.allocateOrMovePocket(
+          walletId: aktifId,
+          fromPocketId: null,
+          toPocketId: tabAktifId,
+          amount: 300000,
+        );
+        await db.allocateOrMovePocket(
+          walletId: arsipId,
+          fromPocketId: null,
+          toPocketId: tabArsipId,
+          amount: 600000,
+        );
+
+        // Sebelum diarsipkan, kedua pos Tabungan masuk (total 900 rb)
+        var activePockets = await db.watchAllActivePockets().first;
+        expect(activePockets.length, 2);
+
+        // Arsipkan Dompet Lama -> hanya pos dari Mandiri (300 rb) yang boleh muncul
+        await (db.update(db.wallets)..where((w) => w.id.equals(arsipId))).write(
+          const WalletsCompanion(isArchived: Value(true)),
+        );
+
+        activePockets = await db.watchAllActivePockets().first;
+        expect(activePockets.length, 1);
+        expect(activePockets.first.pocket.walletId, aktifId);
+        expect(activePockets.first.balance, 300000);
+      },
+    );
   });
 
   group('Pecah Transaksi (Split Komponen) & Antrean QRIS', () {

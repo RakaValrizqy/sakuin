@@ -52,11 +52,43 @@ class GmailImapClient {
   int _tagCounter = 1;
 
   Future<void> _connect() async {
-    _socket = await SecureSocket.connect(
-      _host,
-      _port,
-      timeout: const Duration(seconds: 12),
-    );
+    try {
+      // Prioritaskan IPv4 terlebih dahulu untuk mencegah error `errno = 101 (Network is unreachable)`
+      // pada Wi-Fi kampus/kantor yang memberi DNS IPv6 tanpa jalur routing IPv6.
+      List<InternetAddress> ipv4List = const [];
+      try {
+        ipv4List = await InternetAddress.lookup(
+          _host,
+          type: InternetAddressType.IPv4,
+        ).timeout(const Duration(seconds: 6));
+      } catch (_) {}
+
+      if (ipv4List.isNotEmpty) {
+        final rawSocket = await Socket.connect(
+          ipv4List.first,
+          _port,
+          timeout: const Duration(seconds: 10),
+        );
+        _socket = await SecureSocket.secure(rawSocket, host: _host);
+      } else {
+        _socket = await SecureSocket.connect(
+          _host,
+          _port,
+          timeout: const Duration(seconds: 10),
+        );
+      }
+    } on SocketException catch (e) {
+      throw SocketException(
+        'Tidak dapat terhubung ke Gmail (port 993 kemungkinan diblokir Wi-Fi kampus/kantor atau jaringan terputus). '
+        'Coba pakai data seluler sebentar, atau gunakan Auto-Catat Notifikasi HP. (${e.osError?.errorCode ?? e.message})',
+      );
+    } on TimeoutException {
+      throw const SocketException(
+        'Koneksi ke server Gmail timeout (port 993 kemungkinan diblokir Wi-Fi kampus/kantor). '
+        'Coba gunakan data seluler sebentar.',
+      );
+    }
+
     _sub = _socket!.listen(
       (chunk) {
         _buffer.addAll(chunk);

@@ -1,5 +1,11 @@
 # Catatan Rilis Sakuin
 
+## v1.7.2
+### Perbaikan & Peningkatan
+- **Perbaikan Pos Budget "Hantu" dari Dompet Arsip:** Memperbaiki query daftar pos aktif agar pos budget milik dompet yang sudah diarsipkan tidak lagi ikut terhitung di Ringkasan Pos Budget (tab Dompet) maupun di *Safe-to-Spend*.
+- **Numpad Bawaan HP + Shortcut `rb` / `jt` di Catat Transaksi:** Menghapus keypad buatan aplikasi pada layar Catat Transaksi agar seluruh input nominal di Sakuin konsisten menggunakan **numpad bawaan HP** dengan pemisah titik otomatis, dilengkapi bar tombol cepat **`rb (×1.000)`**, **`jt (×1 jt)`**, **`+10 rb`**, **`+50 rb`**, **`+100 rb`**, dan **`Hapus`**.
+- **Perbaikan Koneksi Gmail di Wi-Fi Kampus/Kantor:** Memprioritaskan koneksi **IPv4** untuk mencegah error `errno = 101 (Network is unreachable)` pada Wi-Fi yang rute IPv6-nya bermasalah, disertai pesan error yang jelas jika port IMAP 993 diblokir firewall Wi-Fi.
+
 ## v1.7.1
 ### Peningkatan & Perbaikan
 - **Penggabungan Pos Budget Bernama Sama Lintas Saku:** Pos budget dengan nama yang sama di berbagai saku (mis. `Uang Harian` di Mandiri, BNI, & DANA, atau `Life Style` & `Lifestyle`) kini otomatis digabungkan menjadi **1 pilihan** di pengaturan *Safe-to-Spend* serta tampil dalam kartu **Ringkasan Pos Budget (Gabungan Semua Saku)** di tab **Dompet**.
