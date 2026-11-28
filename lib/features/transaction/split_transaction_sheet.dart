@@ -115,6 +115,8 @@ class SplitTransactionSheet extends ConsumerStatefulWidget {
 
 class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
   final List<_SplitRowData> _rows = [];
+  final _merchantCtrl = TextEditingController();
+  final _merchantFocus = FocusNode();
   late String _type;
   late int _targetTotal;
   int? _walletId;
@@ -125,12 +127,25 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
   bool _loading = true;
   bool _saving = false;
   List<ItemMemoryData> _allItemHistory = const [];
+  List<MerchantMemoryData> _allMerchantHistory = const [];
   int? _focusedRowIndex;
+  bool _merchantFocused = false;
 
   @override
   void initState() {
     super.initState();
+    _merchantFocus.addListener(() {
+      if (mounted) setState(() => _merchantFocused = _merchantFocus.hasFocus);
+    });
     _initData();
+  }
+
+  static bool _isGenericMerchant(String? raw) {
+    final lower = (raw ?? '').trim().toLowerCase();
+    return lower.isEmpty ||
+        lower == 'pembayaran qris' ||
+        lower.startsWith('transaksi ') ||
+        lower.startsWith('dana masuk ');
   }
 
   Future<void> _initData() async {
@@ -144,6 +159,9 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
       _merchantNote = tx.note.isNotEmpty
           ? tx.note
           : (tx.itemName ?? detail.category?.name ?? '');
+      if (!_isGenericMerchant(tx.merchantName)) {
+        _merchantCtrl.text = tx.merchantName!.trim();
+      }
 
       if (tx.splitGroupId != null) {
         _existingSplitGroupId = tx.splitGroupId;
@@ -153,6 +171,10 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
         var sum = 0;
         for (final s in siblings) {
           sum += s.amount;
+          if (_merchantCtrl.text.isEmpty &&
+              !_isGenericMerchant(s.merchantName)) {
+            _merchantCtrl.text = s.merchantName!.trim();
+          }
           _rows.add(
             _SplitRowData(
               name: s.itemName ?? '',
@@ -196,6 +218,9 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
       _walletId = widget.newWalletId;
       _occurredAt = widget.newOccurredAt ?? DateTime.now();
       _merchantNote = widget.newMerchantName;
+      if (!_isGenericMerchant(widget.newMerchantName)) {
+        _merchantCtrl.text = widget.newMerchantName!.trim();
+      }
       final defaultCatId = await ref
           .read(appDatabaseProvider)
           .findCategoryIdByName('Makanan & Minuman', _type);
@@ -206,9 +231,13 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
       _rows.add(_SplitRowData(categoryId: defaultCatId, note: noteStr));
     }
 
-    _allItemHistory = await ref
-        .read(appDatabaseProvider)
-        .searchItemMemory('', type: _type, limit: 40);
+    final db = ref.read(appDatabaseProvider);
+    _allItemHistory = await db.searchItemMemory('', type: _type, limit: 40);
+    _allMerchantHistory = await db.searchMerchantMemory(
+      '',
+      type: _type,
+      limit: 30,
+    );
 
     for (var i = 0; i < _rows.length; i++) {
       _attachFocusListener(_rows[i]);
@@ -245,6 +274,22 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
         .toList();
   }
 
+  List<MerchantMemoryData> _merchantSuggestions() {
+    if (_allMerchantHistory.isEmpty) return const [];
+    final q = _merchantCtrl.text.trim().toLowerCase();
+    if (q.isEmpty) {
+      return _allMerchantHistory.take(6).toList();
+    }
+    return _allMerchantHistory
+        .where(
+          (m) =>
+              m.displayMerchant.toLowerCase().contains(q) &&
+              m.displayMerchant.toLowerCase() != q,
+        )
+        .take(6)
+        .toList();
+  }
+
   void _applySuggestion(
     _SplitRowData row,
     ItemMemoryData suggestion,
@@ -256,6 +301,11 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
       row.nameCtrl.selection = TextSelection.collapsed(
         offset: suggestion.displayName.length,
       );
+      if (_merchantCtrl.text.trim().isEmpty &&
+          suggestion.lastMerchantName != null &&
+          suggestion.lastMerchantName!.trim().isNotEmpty) {
+        _merchantCtrl.text = suggestion.lastMerchantName!.trim();
+      }
       if (row.amountCtrl.text.trim().isEmpty && suggestion.lastAmount > 0) {
         row.amountCtrl.text = CurrencyFormatter.format(
           suggestion.lastAmount,
@@ -274,6 +324,8 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
 
   @override
   void dispose() {
+    _merchantCtrl.dispose();
+    _merchantFocus.dispose();
     for (final r in _rows) {
       r.dispose();
     }
@@ -383,6 +435,7 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
     }
 
     setState(() => _saving = true);
+    final cleanMerchant = _merchantCtrl.text.trim();
     await ref
         .read(transactionActionsProvider)
         .saveSplitTransactions(
@@ -390,6 +443,7 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
           walletId: _walletId!,
           occurredAt: _occurredAt,
           components: validComponents,
+          merchantName: cleanMerchant.isEmpty ? null : cleanMerchant,
           replaceSingleTransactionId: _replaceSingleTxId,
           existingSplitGroupId: _existingSplitGroupId,
           externalRef: widget.newExternalRef,
@@ -551,6 +605,78 @@ class _SplitTransactionSheetState extends ConsumerState<SplitTransactionSheet> {
                       }),
                     ),
                   ),
+
+                // Nama Merchant / Toko (berlaku untuk semua item pecahan & diingat otomatis)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      TextField(
+                        controller: _merchantCtrl,
+                        focusNode: _merchantFocus,
+                        textCapitalization: TextCapitalization.words,
+                        onChanged: (_) => setState(() {}),
+                        decoration: InputDecoration(
+                          labelText: 'Nama merchant / toko (opsional)',
+                          hintText: 'Contoh: Indomaret, Warteg Bahari, Gojek',
+                          prefixIcon: const Icon(Icons.storefront_rounded),
+                          isDense: true,
+                          suffixIcon: _merchantCtrl.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear_rounded),
+                                  onPressed: () {
+                                    _merchantCtrl.clear();
+                                    setState(() {});
+                                  },
+                                )
+                              : null,
+                        ),
+                      ),
+                      if (_merchantSuggestions().isNotEmpty &&
+                          (_merchantFocused ||
+                              _merchantCtrl.text.trim().isEmpty)) ...[
+                        const SizedBox(height: 6),
+                        SizedBox(
+                          height: 36,
+                          child: ListView.separated(
+                            scrollDirection: Axis.horizontal,
+                            itemCount: _merchantSuggestions().length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(width: 6),
+                            itemBuilder: (_, mIdx) {
+                              final m = _merchantSuggestions()[mIdx];
+                              return ActionChip(
+                                visualDensity: VisualDensity.compact,
+                                avatar: Icon(
+                                  Icons.storefront_rounded,
+                                  size: 14,
+                                  color: cs.primary,
+                                ),
+                                label: Text(
+                                  m.displayMerchant,
+                                  style: tt.labelSmall,
+                                ),
+                                onPressed: () {
+                                  AppHaptics.selection(
+                                    ref.read(settingsProvider).hapticsEnabled,
+                                  );
+                                  setState(() {
+                                    _merchantCtrl.text = m.displayMerchant;
+                                    _merchantCtrl.selection =
+                                        TextSelection.collapsed(
+                                          offset: m.displayMerchant.length,
+                                        );
+                                  });
+                                },
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
 
                 // Daftar Item Pecahan
                 Expanded(

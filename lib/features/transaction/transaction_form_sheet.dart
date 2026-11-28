@@ -14,6 +14,8 @@ import 'package:sakuin/core/utils/thousands_input_formatter.dart';
 import 'package:sakuin/core/widgets/category_icon.dart';
 import 'package:sakuin/core/widgets/nominal_shortcut_bar.dart';
 import 'package:sakuin/features/category/category_form_sheet.dart';
+import 'package:sakuin/features/debt/debt_providers.dart';
+import 'package:sakuin/features/debt/settle_debt_from_income_sheet.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
 import 'package:sakuin/features/wallet/income_allocation_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_form_sheet.dart';
@@ -494,6 +496,15 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
         ref.watch(walletsWithBalancesProvider).valueOrNull ?? const [];
     final allPockets =
         ref.watch(allActivePocketsProvider).valueOrNull ?? const [];
+    final openReceivablesCount =
+        (ref.watch(allDebtsProvider).valueOrNull ?? const [])
+            .where(
+              (d) =>
+                  d.debt.status == 'open' &&
+                  d.debt.direction == 'they_owe' &&
+                  d.remaining > 0,
+            )
+            .length;
     final haptics = ref.watch(settingsProvider.select((s) => s.hapticsEnabled));
 
     if (_walletId == null && wallets.isNotEmpty) {
@@ -908,6 +919,86 @@ class _TransactionFormSheetState extends ConsumerState<TransactionFormSheet> {
                         ),
                     ],
                   ),
+                  if (_type == 'income' &&
+                      !isEdit &&
+                      openReceivablesCount > 0 &&
+                      _walletId != null) ...[
+                    const SizedBox(height: 12),
+                    Card(
+                      color: cs.secondaryContainer.withValues(alpha: 0.4),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.handshake_outlined,
+                              color: cs.primary,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Pelunasan hutang orang lain?',
+                                    style: tt.labelLarge?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  Text(
+                                    '$openReceivablesCount piutang aktif — potong otomatis tanpa dobel hitung pemasukan',
+                                    style: tt.bodySmall?.copyWith(
+                                      color: cs.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            FilledButton.tonal(
+                              onPressed: () async {
+                                final amt = _parsedAmount;
+                                if (amt <= 0) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Isi nominal transfer masuk dulu',
+                                      ),
+                                    ),
+                                  );
+                                  return;
+                                }
+                                final walletName = wallets
+                                    .where((w) => w.wallet.id == _walletId)
+                                    .firstOrNull
+                                    ?.wallet
+                                    .name;
+                                final res = await showSettleDebtFromIncomeSheet(
+                                  context,
+                                  incomingAmount: amt,
+                                  initialWalletId: _walletId!,
+                                  occurredAt: _occurredAt,
+                                  senderHint:
+                                      _merchantCtrl.text.trim().isNotEmpty
+                                      ? _merchantCtrl.text.trim()
+                                      : _itemCtrl.text.trim(),
+                                  bankName: walletName,
+                                );
+                                if (res != null && context.mounted) {
+                                  Navigator.of(context).pop(true);
+                                }
+                              },
+                              child: const Text('Lunasin'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                   if (walletPockets.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     Text(

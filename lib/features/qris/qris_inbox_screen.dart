@@ -12,6 +12,7 @@ import 'package:sakuin/core/utils/receipt_parser.dart';
 import 'package:sakuin/core/widgets/amount_text.dart';
 import 'package:sakuin/features/category/category_form_sheet.dart';
 import 'package:sakuin/features/category/category_providers.dart';
+import 'package:sakuin/features/debt/settle_debt_from_income_sheet.dart';
 import 'package:sakuin/features/receipt/split_bill_screen.dart';
 import 'package:sakuin/features/transaction/split_transaction_sheet.dart';
 import 'package:sakuin/features/transaction/transaction_providers.dart';
@@ -790,6 +791,48 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
     }
   }
 
+  Future<void> _settleDebtFromDraft(
+    ImportedQrisDraft draft,
+    List<WalletWithBalance> wallets,
+  ) async {
+    if (wallets.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Buat minimal 1 dompet terlebih dahulu')),
+      );
+      return;
+    }
+    final walletId =
+        (draft.suggestedWalletId != null &&
+            wallets.any((w) => w.wallet.id == draft.suggestedWalletId))
+        ? draft.suggestedWalletId!
+        : wallets.first.wallet.id;
+
+    final result = await showSettleDebtFromIncomeSheet(
+      context,
+      incomingAmount: draft.amount,
+      initialWalletId: walletId,
+      occurredAt: DateTime.fromMillisecondsSinceEpoch(draft.occurredAt)
+          .toLocal(),
+      senderHint: draft.merchantName,
+      bankName: draft.bankName,
+      externalRef: draft.emailUid,
+    );
+    if (result != null) {
+      await ref.read(qrisSyncServiceProvider).markDraftConfirmed(draft.id);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              result.excessRecordedAsIncome > 0
+                  ? '${result.settledCount} piutang dibayar (${CurrencyFormatter.format(result.totalAllocatedToDebts)}) + sisa ${CurrencyFormatter.format(result.excessRecordedAsIncome)} masuk pemasukan'
+                  : '${result.settledCount} piutang dibayar sebesar ${CurrencyFormatter.format(result.totalAllocatedToDebts)}',
+            ),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _splitBillDraft(
     ImportedQrisDraft draft,
     List<WalletWithBalance> wallets,
@@ -1483,6 +1526,21 @@ class _QrisInboxScreenState extends ConsumerState<QrisInboxScreen> {
                                                       .dismissDraft(draft.id),
                                                   child: const Text('Abaikan'),
                                                 ),
+                                                if (isIncome)
+                                                  OutlinedButton.icon(
+                                                    onPressed: () =>
+                                                        _settleDebtFromDraft(
+                                                          draft,
+                                                          wallets,
+                                                        ),
+                                                    icon: const Icon(
+                                                      Icons.handshake_outlined,
+                                                      size: 16,
+                                                    ),
+                                                    label: const Text(
+                                                      'Lunasin Piutang',
+                                                    ),
+                                                  ),
                                                 if (!isIncome) ...[
                                                   OutlinedButton.icon(
                                                     onPressed: () =>

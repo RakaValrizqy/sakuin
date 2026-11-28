@@ -5,6 +5,7 @@ import 'package:sakuin/core/services/auto_backup_service.dart';
 import 'package:sakuin/core/services/backup_service.dart';
 import 'package:sakuin/core/utils/notification_tx_parser.dart';
 import 'package:sakuin/core/utils/quick_input_parser.dart';
+import 'package:sakuin/features/debt/settle_debt_from_income_sheet.dart';
 
 void main() {
   group('QuickInputParser (Catat Cepat 1 Baris)', () {
@@ -216,6 +217,39 @@ void main() {
         );
         expect(restoredMerch, isNotNull);
         expect(restoredMerch!.lastItemName, 'Es Kopi Susu');
+
+        // Pecah item juga menyimpan merchantName pada semua item pecahan & melatih MerchantMemory
+        final splitGroupId = await db.saveSplitTransactions(
+          type: 'expense',
+          walletId: walletId,
+          occurredAt: DateTime(2026, 11, 28, 12, 0),
+          merchantName: 'Warteg Bahari',
+          components: [
+            SplitComponentInput(
+              itemName: 'Nasi Rames',
+              amount: 15000,
+              categoryId: foodCatId,
+              pocketId: pocketId,
+            ),
+            SplitComponentInput(
+              itemName: 'Es Teh Manis',
+              amount: 5000,
+              categoryId: foodCatId,
+              pocketId: pocketId,
+            ),
+          ],
+        );
+        final siblings = await db.getTransactionsBySplitGroup(splitGroupId);
+        expect(siblings.length, 2);
+        expect(
+          siblings.every((t) => t.merchantName == 'Warteg Bahari'),
+          isTrue,
+        );
+        final wartegMem = await db.findMerchantMemoryForName('Warteg Bahari');
+        expect(wartegMem, isNotNull);
+        expect(wartegMem!.lastAmount, 20000);
+        final esTehMem = await db.searchItemMemory('es teh manis');
+        expect(esTehMem.first.lastMerchantName, 'Warteg Bahari');
       },
     );
   });
@@ -298,6 +332,61 @@ void main() {
         ),
         isFalse,
       );
+    });
+
+    test('captures BNI/Mandiri credit notifications and allocates across multiple receivables', () {
+      final ts = DateTime(2026, 11, 28, 11, 0);
+      final bniCredit = NotificationTxParser.parse(
+        packageName: 'id.bni.wondr',
+        title: 'Transaksi Kredit',
+        text: 'Rekening Anda dikredit sebesar Rp 75.000 dari Andi Wijaya',
+        timestamp: ts,
+        captureIncome: true,
+      );
+      expect(bniCredit, isNotNull);
+      expect(bniCredit!.txType, 'income');
+      expect(bniCredit.amount, 75000);
+
+      // Alokasi transfer masuk Rp 75.000 ke 2 item piutang (50rb + 20rb) -> pas lunas keduanya, sisa 5rb
+      const person = Person(id: 1, name: 'Andi Wijaya', phone: null, note: '');
+      const d1 = DebtWithSummary(
+        debt: Debt(
+          id: 101,
+          personId: 1,
+          direction: 'they_owe',
+          principal: 50000,
+          note: 'Split Bill Makan',
+          createdAt: 0,
+          dueDate: null,
+          walletId: 1,
+          status: 'open',
+        ),
+        person: person,
+        paidTotal: 0,
+      );
+      const d2 = DebtWithSummary(
+        debt: Debt(
+          id: 102,
+          personId: 1,
+          direction: 'they_owe',
+          principal: 20000,
+          note: 'Kopi Susu',
+          createdAt: 0,
+          dueDate: null,
+          walletId: 1,
+          status: 'open',
+        ),
+        person: person,
+        paidTotal: 0,
+      );
+
+      final alloc = computeDebtAllocationMap(
+        incomingAmount: 75000,
+        selectedDebts: const [d1, d2],
+      );
+      expect(alloc[101], 50000);
+      expect(alloc[102], 20000);
+      expect(75000 - (alloc[101]! + alloc[102]!), 5000);
     });
   });
 }

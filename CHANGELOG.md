@@ -1,5 +1,11 @@
 # Catatan Rilis Sakuin
 
+## v1.8.1
+### Apa yang Baru
+- **Input Nama Merchant di Pecah Transaksi (*Split Item*):** Layar **Pecah Transaksi** kini dilengkapi kolom **Nama merchant / toko (opsional)** lengkap dengan saran otomatis dari riwayat merchant. Nama merchant otomatis tersimpan ke seluruh item pecahan sekaligus melatih memori pasangan **Merchant ↔ Item**.
+- **Alokasi Transfer Masuk ke Pelunasan Hutang Orang Lain (Piutang):** Saat menerima transfer masuk (dari Mandiri, BNI, atau bank/e-wallet lain lewat notifikasi HP maupun input Pemasukan manual), kini tersedia tombol **`Lunasin Piutang`** untuk memilih 1 atau beberapa item piutang orang lain sekaligus, opsional mengembalikan dana ke **Pos Budget** tertentu, dan mencatat sisa kelebihan transfer (jika ada) tanpa dobel hitung pemasukan.
+- **Perluasan Deteksi Notifikasi Transfer Masuk Mandiri & BNI:** Menambahkan pengenalan pola notifikasi kredit/pengkreditan rekening Mandiri Livin' & BNI Wondr/Mobile.
+
 ## v1.8.0
 ### Apa yang Baru
 - **Input Nama Merchant + Auto-Fill Pasangan Penuh (Merchant ↔ Item ↔ Nominal ↔ Kategori ↔ Dompet ↔ Pos):** Setiap catatan transaksi kini punya kolom **Nama Merchant / Toko** (opsional) dengan saran otomatis dua arah — ketuk saran item maupun merchant untuk langsung mengisi seluruh data transaksi tanpa input ulang.

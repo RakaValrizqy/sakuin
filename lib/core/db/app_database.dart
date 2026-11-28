@@ -962,6 +962,7 @@ FROM wallet_pockets p
     required int walletId,
     required DateTime occurredAt,
     required List<SplitComponentInput> components,
+    String? merchantName,
     int? replaceSingleTransactionId,
     String? existingSplitGroupId,
     String? externalRef,
@@ -975,6 +976,10 @@ FROM wallet_pockets p
     final nowMillis = DateTime.now().toUtc().millisecondsSinceEpoch;
     final occurredMillis = occurredAt.toUtc().millisecondsSinceEpoch;
     final dayKey = AppDateUtils.toDayKey(occurredAt);
+    final trimmedMerchant = merchantName?.trim();
+    String? cleanMerchant = (trimmedMerchant == null || trimmedMerchant.isEmpty)
+        ? null
+        : trimmedMerchant;
 
     return transaction(() async {
       String? preservedRef = externalRef;
@@ -984,6 +989,7 @@ FROM wallet_pockets p
                   ..where((t) => t.id.equals(replaceSingleTransactionId)))
                 .getSingleOrNull();
         preservedRef ??= orig?.externalRef;
+        cleanMerchant ??= orig?.merchantName;
         await (delete(
           transactions,
         )..where((t) => t.id.equals(replaceSingleTransactionId))).go();
@@ -999,13 +1005,23 @@ FROM wallet_pockets p
             }
           }
         }
+        if (cleanMerchant == null) {
+          for (final s in siblings) {
+            if (s.merchantName != null && s.merchantName!.trim().isNotEmpty) {
+              cleanMerchant = s.merchantName;
+              break;
+            }
+          }
+        }
         await (delete(
           transactions,
         )..where((t) => t.splitGroupId.equals(existingSplitGroupId))).go();
       }
 
+      var totalAmount = 0;
       for (var i = 0; i < components.length; i++) {
         final comp = components[i];
+        totalAmount += comp.amount;
         final cleanName = comp.itemName.trim();
         await into(transactions).insert(
           TransactionsCompanion.insert(
@@ -1016,6 +1032,7 @@ FROM wallet_pockets p
             pocketId: Value(comp.pocketId),
             note: Value(comp.note.trim()),
             itemName: Value(cleanName.isEmpty ? null : cleanName),
+            merchantName: Value(cleanMerchant),
             splitGroupId: Value(components.length > 1 ? groupId : null),
             externalRef: Value(preservedRef),
             occurredAt: occurredMillis,
@@ -1029,12 +1046,30 @@ FROM wallet_pockets p
             displayName: cleanName,
             type: type,
             amount: comp.amount,
+            merchantName: cleanMerchant,
             categoryId: comp.categoryId,
             walletId: walletId,
             pocketId: comp.pocketId,
             note: comp.note.trim(),
           );
         }
+      }
+
+      final resolvedMerchant = cleanMerchant;
+      if (resolvedMerchant != null && (type == 'income' || type == 'expense')) {
+        final first = components.first;
+        await upsertMerchantMemory(
+          displayMerchant: resolvedMerchant,
+          type: type,
+          itemName: first.itemName.trim().isEmpty
+              ? null
+              : first.itemName.trim(),
+          amount: totalAmount,
+          categoryId: first.categoryId,
+          walletId: walletId,
+          pocketId: first.pocketId,
+          note: first.note.trim(),
+        );
       }
 
       return groupId;

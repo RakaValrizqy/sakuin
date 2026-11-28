@@ -80,12 +80,18 @@ class NotificationTxParser {
     'transfer masuk',
     'kamu menerima',
     'anda menerima',
+    'menerima transfer',
+    'menerima dana',
+    'dana diterima',
     'terima dana',
     'terima transfer',
     'top up berhasil',
     'isi saldo berhasil',
     'cashback masuk',
     'kredit sebesar',
+    'pengkreditan',
+    'dikredit',
+    'transaksi kredit',
     'credited',
   ];
 
