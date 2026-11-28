@@ -13,6 +13,7 @@ import 'package:sakuin/core/widgets/category_icon.dart';
 import 'package:sakuin/features/wallet/income_allocation_sheet.dart';
 import 'package:sakuin/features/wallet/pocket_sheets.dart';
 import 'package:sakuin/features/wallet/transfer_sheet.dart';
+import 'package:sakuin/features/wallet/unallocated_audit_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_form_sheet.dart';
 import 'package:sakuin/features/wallet/wallet_providers.dart';
 
@@ -345,51 +346,108 @@ class _WalletDetailScreenState extends ConsumerState<WalletDetailScreen> {
                       const SizedBox(height: 12),
                     ],
 
-                    // Baris Saldo Bebas (Belum Dialokasikan)
-                    Row(
-                      children: [
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: cs.surfaceContainerHighest.withValues(
-                              alpha: 0.7,
+                    // Baris Saldo Bebas (Belum Dialokasikan) — ketuk untuk Lacak Penyebab / Audit Mutasi
+                    InkWell(
+                      borderRadius: BorderRadius.circular(12),
+                      onTap: () async {
+                        final changed = await showUnallocatedAuditSheet(
+                          context,
+                          walletId: wb.wallet.id,
+                          walletName: wb.wallet.name,
+                        );
+                        if (changed == true) _loadData();
+                      },
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 2),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  width: 40,
+                                  height: 40,
+                                  decoration: BoxDecoration(
+                                    color: unallocated < 0
+                                        ? AppColors.expense(context)
+                                              .withValues(alpha: 0.14)
+                                        : cs.surfaceContainerHighest.withValues(
+                                            alpha: 0.7,
+                                          ),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: Icon(
+                                    unallocated < 0
+                                        ? Icons.manage_search_rounded
+                                        : Icons.account_balance_wallet_outlined,
+                                    color: unallocated < 0
+                                        ? AppColors.expense(context)
+                                        : cs.onSurfaceVariant,
+                                    size: 20,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Saldo Bebas', style: tt.titleSmall),
+                                      Text(
+                                        unallocated < 0
+                                            ? 'Alokasi melebihi saldo saku • Ketuk untuk lacak'
+                                            : 'Ketuk untuk lihat mutasi Saldo Bebas',
+                                        style: tt.bodySmall?.copyWith(
+                                          color: unallocated < 0
+                                              ? AppColors.expense(context)
+                                              : cs.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                AmountText(
+                                  amount: unallocated,
+                                  type: unallocated < 0 ? 'expense' : null,
+                                  style: tt.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(width: 2),
+                                Icon(
+                                  Icons.chevron_right_rounded,
+                                  size: 18,
+                                  color: cs.onSurfaceVariant,
+                                ),
+                              ],
                             ),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Icon(
-                            Icons.account_balance_wallet_outlined,
-                            color: cs.onSurfaceVariant,
-                            size: 20,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Saldo Bebas', style: tt.titleSmall),
-                              Text(
-                                unallocated < 0
-                                    ? 'Alokasi melebihi saldo saku'
-                                    : 'Belum dialokasikan ke pos budget',
-                                style: tt.bodySmall?.copyWith(
-                                  color: unallocated < 0
-                                      ? AppColors.expense(context)
-                                      : cs.onSurfaceVariant,
+                            if (unallocated < 0) ...[
+                              const SizedBox(height: 8),
+                              SizedBox(
+                                width: double.infinity,
+                                child: OutlinedButton.icon(
+                                  onPressed: () async {
+                                    final changed =
+                                        await showUnallocatedAuditSheet(
+                                          context,
+                                          walletId: wb.wallet.id,
+                                          walletName: wb.wallet.name,
+                                        );
+                                    if (changed == true) _loadData();
+                                  },
+                                  icon: const Icon(
+                                    Icons.manage_search_rounded,
+                                    size: 18,
+                                  ),
+                                  label: Text(
+                                    'Lacak Penyebab Selisih ${CurrencyFormatter.format(unallocated.abs())}',
+                                  ),
                                 ),
                               ),
                             ],
-                          ),
+                          ],
                         ),
-                        AmountText(
-                          amount: unallocated,
-                          type: unallocated < 0 ? 'expense' : null,
-                          style: tt.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ],
+                      ),
                     ),
 
                     if (pockets.isEmpty) ...[

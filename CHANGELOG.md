@@ -1,5 +1,9 @@
 # Catatan Rilis Sakuin
 
+## v1.8.2
+### Apa yang Baru
+- **Lacak Saldo Bebas (Audit Selisih Saku):** Di halaman **Detail Saku**, ketuk baris **Saldo Bebas** (atau tombol **Lacak Penyebab Selisih** saat Saldo Bebas minus) untuk melihat seluruh riwayat mutasi yang memengaruhi Saldo Bebas secara kronologis (transaksi tanpa Pos Budget, alokasi manual, saldo awal, dan hutang/piutang) lengkap dengan saldo berjalan, penanda **`Cocok selisih!`** otomatis, tombol 1 ketuk **`Pindah ke Pos`** langsung di tiap transaksi, serta tombol **`Tutup Selisih dari Pos...`** untuk merapikan Saldo Bebas kembali ke Rp 0.
+
 ## v1.8.1
 ### Apa yang Baru
 - **Input Nama Merchant di Pecah Transaksi (*Split Item*):** Layar **Pecah Transaksi** kini dilengkapi kolom **Nama merchant / toko (opsional)** lengkap dengan saran otomatis dari riwayat merchant. Nama merchant otomatis tersimpan ke seluruh item pecahan sekaligus melatih memori pasangan **Merchant ↔ Item**.

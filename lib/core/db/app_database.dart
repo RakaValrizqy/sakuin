@@ -344,6 +344,42 @@ class PersonDebtSummary {
   int get netTheyOwe => theyOweRemaining - iOweRemaining;
 }
 
+class UnallocatedAuditEvent {
+  const UnallocatedAuditEvent({
+    required this.kind,
+    required this.title,
+    required this.subtitle,
+    required this.delta,
+    required this.timestamp,
+    this.runningBalanceAfter = 0,
+    this.transactionDetail,
+    this.isIncomingTransferToUnallocated = false,
+  });
+
+  /// 'initial' | 'tx_expense' | 'tx_income' | 'tx_transfer_out' | 'tx_transfer_in' | 'allocation' | 'debt' | 'debt_payment'
+  final String kind;
+  final String title;
+  final String subtitle;
+  final int delta;
+  final int timestamp;
+  final int runningBalanceAfter;
+  final TransactionDetail? transactionDetail;
+  final bool isIncomingTransferToUnallocated;
+
+  UnallocatedAuditEvent copyWith({int? runningBalanceAfter}) {
+    return UnallocatedAuditEvent(
+      kind: kind,
+      title: title,
+      subtitle: subtitle,
+      delta: delta,
+      timestamp: timestamp,
+      runningBalanceAfter: runningBalanceAfter ?? this.runningBalanceAfter,
+      transactionDetail: transactionDetail,
+      isIncomingTransferToUnallocated: isIncomingTransferToUnallocated,
+    );
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Database
 // ---------------------------------------------------------------------------
@@ -1374,6 +1410,288 @@ FROM wallet_pockets p
     await (update(walletPockets)..where((p) => p.id.equals(pocketId))).write(
       WalletPocketsCompanion(targetAmount: Value(targetAmount)),
     );
+  }
+
+  /// Pindahkan transaksi yang sebelumnya tercatat di Saldo Bebas ke suatu Pos Budget.
+  Future<void> assignTransactionPocket({
+    required int transactionId,
+    required int pocketId,
+    bool isIncomingTransferTarget = false,
+  }) async {
+    final nowMillis = DateTime.now().toUtc().millisecondsSinceEpoch;
+    await (update(
+      transactions,
+    )..where((t) => t.id.equals(transactionId))).write(
+      TransactionsCompanion(
+        pocketId: isIncomingTransferTarget
+            ? const Value.absent()
+            : Value(pocketId),
+        toPocketId: isIncomingTransferTarget
+            ? Value(pocketId)
+            : const Value.absent(),
+        updatedAt: Value(nowMillis),
+      ),
+    );
+  }
+
+  /// Lacak seluruh mutasi yang memengaruhi Saldo Bebas (Belum Dialokasikan) pada suatu dompet,
+  /// sehingga pengguna bisa melihat secara persis transaksi/alokasi mana yang membuat Saldo Bebas
+  /// minus atau tidak sesuai harapan.
+  Future<List<UnallocatedAuditEvent>> getWalletUnallocatedAuditEvents(
+    int walletId,
+  ) async {
+    final wallet = await (select(
+      wallets,
+    )..where((w) => w.id.equals(walletId))).getSingleOrNull();
+    if (wallet == null) return const [];
+
+    final allPockets = await getPocketsForWallet(
+      walletId,
+      includeArchived: true,
+    );
+    final pocketNames = {
+      for (final p in allPockets) p.pocket.id: p.pocket.name,
+    };
+
+    final events = <UnallocatedAuditEvent>[];
+
+    // 1. Saldo awal dompet
+    if (wallet.initialBalance != 0) {
+      events.add(
+        UnallocatedAuditEvent(
+          kind: 'initial',
+          title: 'Saldo Awal ${wallet.name}',
+          subtitle: 'Modal awal dompet saat dibuat',
+          delta: wallet.initialBalance,
+          timestamp: 0,
+        ),
+      );
+    }
+
+    // 2. Transaksi di dompet ini yang TIDAK memakai Pos Budget (pocket_id IS NULL / to_pocket_id IS NULL)
+    final txRows = await customSelect(
+      '''
+      SELECT
+        t.id AS t_id, t.type AS t_type, t.amount AS t_amount, t.category_id AS t_category_id,
+        t.wallet_id AS t_wallet_id, t.to_wallet_id AS t_to_wallet_id,
+        t.pocket_id AS t_pocket_id, t.to_pocket_id AS t_to_pocket_id, t.fee AS t_fee,
+        t.note AS t_note, t.item_name AS t_item_name, t.merchant_name AS t_merchant_name,
+        t.split_group_id AS t_split_group_id, t.external_ref AS t_external_ref,
+        t.occurred_at AS t_occurred_at,
+        t.day_key AS t_day_key, t.created_at AS t_created_at, t.updated_at AS t_updated_at,
+        w.id AS w_id, w.name AS w_name, w.type AS w_type, w.icon AS w_icon,
+        w.color AS w_color, w.initial_balance AS w_initial_balance,
+        w.include_in_total AS w_include_in_total, w.is_archived AS w_is_archived,
+        w.sort_order AS w_sort_order,
+        tw.id AS tw_id, tw.name AS tw_name, tw.type AS tw_type, tw.icon AS tw_icon,
+        tw.color AS tw_color, tw.initial_balance AS tw_initial_balance,
+        tw.include_in_total AS tw_include_in_total, tw.is_archived AS tw_is_archived,
+        tw.sort_order AS tw_sort_order,
+        c.id AS c_id, c.name AS c_name, c.type AS c_type, c.icon AS c_icon,
+        c.color AS c_color, c.sort_order AS c_sort_order, c.is_archived AS c_is_archived,
+        pk.name AS pk_name,
+        tpk.name AS tpk_name
+      FROM transactions t
+      INNER JOIN wallets w ON w.id = t.wallet_id
+      LEFT JOIN wallets tw ON tw.id = t.to_wallet_id
+      LEFT JOIN categories c ON c.id = t.category_id
+      LEFT JOIN wallet_pockets pk ON pk.id = t.pocket_id
+      LEFT JOIN wallet_pockets tpk ON tpk.id = t.to_pocket_id
+      WHERE
+        (t.wallet_id = ? AND t.pocket_id IS NULL)
+        OR (t.type = 'transfer' AND t.to_wallet_id = ? AND t.to_pocket_id IS NULL)
+      ORDER BY t.occurred_at ASC, t.id ASC
+      ''',
+      variables: [Variable.withInt(walletId), Variable.withInt(walletId)],
+    ).get();
+
+    for (final row in txRows) {
+      final detail = _mapTransactionDetailRow(row);
+      final tx = detail.transaction;
+      if (tx.walletId == walletId && tx.pocketId == null) {
+        if (tx.type == 'expense') {
+          final label = (tx.itemName != null && tx.itemName!.trim().isNotEmpty)
+              ? tx.itemName!.trim()
+              : (tx.merchantName != null && tx.merchantName!.trim().isNotEmpty
+                    ? tx.merchantName!.trim()
+                    : (detail.category?.name ?? 'Pengeluaran'));
+          events.add(
+            UnallocatedAuditEvent(
+              kind: 'tx_expense',
+              title: label,
+              subtitle:
+                  'Pengeluaran tanpa Pos Budget${detail.category != null ? ' • ${detail.category!.name}' : ''}',
+              delta: -tx.amount,
+              timestamp: tx.occurredAt,
+              transactionDetail: detail,
+            ),
+          );
+        } else if (tx.type == 'income') {
+          final label = (tx.itemName != null && tx.itemName!.trim().isNotEmpty)
+              ? tx.itemName!.trim()
+              : (detail.category?.name ?? 'Pemasukan');
+          events.add(
+            UnallocatedAuditEvent(
+              kind: 'tx_income',
+              title: label,
+              subtitle:
+                  'Pemasukan ke Saldo Bebas${detail.category != null ? ' • ${detail.category!.name}' : ''}',
+              delta: tx.amount,
+              timestamp: tx.occurredAt,
+              transactionDetail: detail,
+            ),
+          );
+        } else if (tx.type == 'transfer') {
+          final totalOut = tx.amount + tx.fee;
+          events.add(
+            UnallocatedAuditEvent(
+              kind: 'tx_transfer_out',
+              title: 'Transfer ke ${detail.toWallet?.name ?? "Saku lain"}',
+              subtitle: tx.fee > 0
+                  ? 'Keluar dari Saldo Bebas (termasuk admin Rp ${tx.fee})'
+                  : 'Keluar dari Saldo Bebas (tanpa Pos Budget)',
+              delta: -totalOut,
+              timestamp: tx.occurredAt,
+              transactionDetail: detail,
+            ),
+          );
+        }
+      }
+      if (tx.type == 'transfer' &&
+          tx.toWalletId == walletId &&
+          tx.toPocketId == null) {
+        events.add(
+          UnallocatedAuditEvent(
+            kind: 'tx_transfer_in',
+            title: 'Transfer masuk dari ${detail.wallet.name}',
+            subtitle: 'Masuk ke Saldo Bebas (belum dipilih Pos Budget)',
+            delta: tx.amount,
+            timestamp: tx.occurredAt,
+            transactionDetail: detail,
+            isIncomingTransferToUnallocated: true,
+          ),
+        );
+      }
+    }
+
+    // 3. Alokasi manual dari/ke Saldo Bebas (from_pocket_id IS NULL atau to_pocket_id IS NULL)
+    final allocRows =
+        await (select(pocketAllocations)
+              ..where(
+                (pa) =>
+                    pa.walletId.equals(walletId) &
+                    (pa.fromPocketId.isNull() | pa.toPocketId.isNull()),
+              )
+              ..orderBy([(pa) => OrderingTerm.asc(pa.createdAt)]))
+            .get();
+    for (final pa in allocRows) {
+      if (pa.fromPocketId == null && pa.toPocketId != null) {
+        final targetName = pocketNames[pa.toPocketId] ?? 'Pos Budget';
+        events.add(
+          UnallocatedAuditEvent(
+            kind: 'allocation',
+            title: 'Alokasi ke $targetName',
+            subtitle: pa.note.isNotEmpty
+                ? pa.note
+                : 'Alokasi dari Saldo Bebas ke pos',
+            delta: -pa.amount,
+            timestamp: pa.createdAt,
+          ),
+        );
+      } else if (pa.fromPocketId != null && pa.toPocketId == null) {
+        final sourceName = pocketNames[pa.fromPocketId] ?? 'Pos Budget';
+        events.add(
+          UnallocatedAuditEvent(
+            kind: 'allocation',
+            title: 'Tarik dari $sourceName',
+            subtitle: pa.note.isNotEmpty
+                ? pa.note
+                : 'Dikembalikan ke Saldo Bebas',
+            delta: pa.amount,
+            timestamp: pa.createdAt,
+          ),
+        );
+      }
+    }
+
+    // 4. Hutang/Piutang yang langsung memengaruhi saldo dompet ini
+    final debtRows = await customSelect(
+      '''
+      SELECT d.direction, d.principal, d.note, d.created_at, p.name AS person_name
+      FROM debts d
+      INNER JOIN people p ON p.id = d.person_id
+      WHERE d.wallet_id = ?
+      ORDER BY d.created_at ASC
+      ''',
+      variables: [Variable.withInt(walletId)],
+    ).get();
+    for (final r in debtRows) {
+      final dir = r.read<String>('direction');
+      final principal = r.read<int>('principal');
+      final person = r.read<String>('person_name');
+      final note = r.read<String>('note');
+      final isIOwe = dir == 'i_owe';
+      events.add(
+        UnallocatedAuditEvent(
+          kind: 'debt',
+          title: isIOwe ? 'Pinjaman dari $person' : 'Piutang ke $person',
+          subtitle: note.isNotEmpty
+              ? note
+              : (isIOwe
+                    ? 'Masuk ke Saldo Bebas'
+                    : 'Keluar dari Saldo Bebas (talangan/pinjaman)'),
+          delta: isIOwe ? principal : -principal,
+          timestamp: r.read<int>('created_at'),
+        ),
+      );
+    }
+
+    // 5. Pembayaran cicilan / pelunasan hutang-piutang yang memakai dompet ini
+    final payRows = await customSelect(
+      '''
+      SELECT dp.amount, dp.paid_at, dp.note, d.direction, p.name AS person_name
+      FROM debt_payments dp
+      INNER JOIN debts d ON d.id = dp.debt_id
+      INNER JOIN people p ON p.id = d.person_id
+      WHERE dp.wallet_id = ?
+      ORDER BY dp.paid_at ASC
+      ''',
+      variables: [Variable.withInt(walletId)],
+    ).get();
+    for (final r in payRows) {
+      final dir = r.read<String>('direction');
+      final amt = r.read<int>('amount');
+      final person = r.read<String>('person_name');
+      final note = r.read<String>('note');
+      final isTheyOwe = dir == 'they_owe';
+      events.add(
+        UnallocatedAuditEvent(
+          kind: 'debt_payment',
+          title: isTheyOwe
+              ? 'Pelunasan dari $person'
+              : 'Bayar hutang ke $person',
+          subtitle: note.isNotEmpty
+              ? note
+              : (isTheyOwe
+                    ? 'Pelunasan piutang masuk Saldo Bebas'
+                    : 'Bayar hutang keluar dari Saldo Bebas'),
+          delta: isTheyOwe ? amt : -amt,
+          timestamp: r.read<int>('paid_at'),
+        ),
+      );
+    }
+
+    // Urutkan kronologis naik untuk menghitung saldo berjalan (running balance)
+    events.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    var running = 0;
+    final withRunning = <UnallocatedAuditEvent>[];
+    for (final e in events) {
+      running += e.delta;
+      withRunning.add(e.copyWith(runningBalanceAfter: running));
+    }
+
+    // Kembalikan terbaru di atas agar penyebab paling baru langsung terlihat
+    return withRunning.reversed.toList();
   }
 
   TransactionDetail _mapTransactionDetailRow(QueryRow r) {

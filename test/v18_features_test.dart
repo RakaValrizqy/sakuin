@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sakuin/core/db/app_database.dart';
@@ -250,6 +251,60 @@ void main() {
         expect(wartegMem!.lastAmount, 20000);
         final esTehMem = await db.searchItemMemory('es teh manis');
         expect(esTehMem.first.lastMerchantName, 'Warteg Bahari');
+
+        // Audit Saldo Bebas: pengeluaran 18rb tanpa Pos Budget terdeteksi persis & bisa dipindah ke Pos
+        final bniId = await db
+            .into(db.wallets)
+            .insert(
+              WalletsCompanion.insert(
+                name: 'BNI',
+                type: 'bank',
+                icon: 'bank',
+                color: 0xFFEA580C,
+                initialBalance: const Value(253051),
+              ),
+            );
+        final bniHarianId = await db
+            .into(db.walletPockets)
+            .insert(
+              WalletPocketsCompanion.insert(
+                walletId: bniId,
+                name: 'Uang Harian',
+                icon: 'food',
+                color: 0xFFEA580C,
+              ),
+            );
+        await db.allocateOrMovePocket(
+          walletId: bniId,
+          fromPocketId: null,
+          toPocketId: bniHarianId,
+          amount: 253051,
+        );
+        final suspectTxId = await db.saveTransactionWithMemory(
+          type: 'expense',
+          amount: 18000,
+          walletId: bniId,
+          pocketId: null, // Lupa pilih pos -> masuk Saldo Bebas!
+          categoryId: foodCatId,
+          itemName: 'Parkir & Minum',
+          occurredAt: DateTime(2026, 11, 28, 19, 0),
+        );
+
+        expect(await db.getWalletUnallocatedBalance(bniId), -18000);
+        final audit = await db.getWalletUnallocatedAuditEvents(bniId);
+        expect(audit.first.runningBalanceAfter, -18000);
+        final suspect = audit.firstWhere(
+          (e) => e.transactionDetail?.transaction.id == suspectTxId,
+        );
+        expect(suspect.delta, -18000);
+
+        // Pindahkan 1 ketuk ke Pos Uang Harian -> Saldo Bebas kembali Rp 0!
+        await db.assignTransactionPocket(
+          transactionId: suspectTxId,
+          pocketId: bniHarianId,
+        );
+        expect(await db.getWalletUnallocatedBalance(bniId), 0);
+        expect((await db.getWalletWithBalance(bniId))?.balance, 235051);
       },
     );
   });
